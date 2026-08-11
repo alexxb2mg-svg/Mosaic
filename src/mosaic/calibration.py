@@ -52,6 +52,12 @@ GRILLE_STANDARD: list[tuple[float, float, float]] = [
     (0.33, 0.33, 0.34),
     (0.50, 0.30, 0.20),
     (0.45, 0.45, 0.10),
+    # Prolongement de l'axe signature : sur Alloprof (terrain lexical, requêtes
+    # d'élèves) la gagnante (0.50, 0.30, 0.20) était au BORD de la grille — règle
+    # du bord : quand la gagnante touche une extrémité, la grille doit la dépasser.
+    (0.60, 0.30, 0.10),
+    (0.55, 0.40, 0.05),
+    (0.70, 0.25, 0.05),
 ]
 SEUIL_REQUETES_FIABLES = 10
 GAIN_MINIMAL_MRR = 0.02  # en-deçà, le rapport dit « gardez le défaut »
