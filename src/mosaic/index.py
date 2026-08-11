@@ -8,6 +8,7 @@ from mosaic import GRID_DEFAULT, ingest, queries
 from mosaic import rerank as rerank_module
 from mosaic import facettes as facettes_module
 from mosaic import profil as profil_module
+from mosaic.bm25 import Bm25
 from mosaic.collocations import detect, merge
 from mosaic.docio import _EXTS, _path_tokens, _read_text, _read_text_convertible
 from mosaic.embeddings import Embeddings
@@ -21,10 +22,12 @@ from mosaic.relations import (
 )
 from mosaic.smoothing import smooth
 from mosaic.store import (
+    load_bm25,
     load_docs,
     load_relations,
     load_rerank,
     load_vocab,
+    save_bm25,
     save_docs,
     save_relations,
     save_rerank,
@@ -98,6 +101,7 @@ class Index:
         relations_manifest: dict[str, set[str]] | None = None,
         facettes: dict[str, dict[str, str]] | None = None,
         profil: dict | None = None,
+        bm25: Bm25 | None = None,
     ) -> None:
         self.index_dir = index_dir
         self.profiles = profiles
@@ -138,6 +142,9 @@ class Index:
         # Profil d'index (paramétrage déclaratif métier) — None = défauts historiques.
         # Persisté dans le meta : build/add/search relisent LE MÊME profil (règle 1).
         self.profil: dict | None = profil
+        # Canal BM25 (fusion hybride, opt-in --hybride) : None quand l'index n'a pas de
+        # bm25.msbm — search(fusion=True) refuse loud (cf. queries.search_fusion).
+        self.bm25: Bm25 | None = bm25
         # Cache float32 OPTIONNEL de la matrice documents (chemin chaud). Le produit
         # int8 @ float upcaste toute la matrice À CHAQUE requête (mesuré : 577 ms sur
         # 18k docs contre 51 ms pré-converti — 11x). Trade-off explicite RAM vs latence :
@@ -180,10 +187,16 @@ class Index:
         relations: bool = False,
         type_doc: bool = False,
         profil: dict | None = None,
+        hybride: bool = False,
     ) -> "Index":
         corpus_dir, index_dir = Path(corpus_dir), Path(index_dir)
         if not corpus_dir.is_dir():
             raise ValueError(f"corpus introuvable : {corpus_dir}")
+        if hybride:
+            # Un index hybride = les TROIS canaux de la fusion (grille + BM25 + embeddings) :
+            # le trio est ce que la mesure a validé, le duo grille+BM25 a été mesuré nuisible
+            # (cf. mosaic.bm25). --hybride implique donc les vecteurs rerank.
+            rerank_vectors = True
         if profil is not None:
             profil = profil_module.valider(profil)  # casse fort et tôt (règle 2)
         if rerank_vectors and not rerank_module.available():
@@ -275,6 +288,9 @@ class Index:
             # qu'un search() après Index.open() — jamais deux comportements pour le même index.
             rerank_vecs = _round_f16(rerank_module.encode_texts(rerank_texts))
             rerank_model = rerank_module.MODEL_NAME
+        # Postings BM25 sur le MÊME flux de tokens que la grille (canonical + collocations,
+        # chemins selon index_paths) : les deux canaux de la fusion voient le même monde.
+        bm25 = Bm25.from_docs(docs) if hybride else None
         index_dir.mkdir(parents=True, exist_ok=True)
         idx = cls(
             index_dir,
@@ -300,6 +316,7 @@ class Index:
             ocr=ocr,
             facettes=facettes,
             profil=profil,
+            bm25=bm25,
         )
         if relations:
             idx._build_relations()
@@ -402,6 +419,12 @@ class Index:
                     "reconstruire avec `mosaic build --relations`"
                 )
             relations_manifest = {k: set(v) for k, v in manifest_lists.items()}
+        bm25 = load_bm25(index_dir)
+        if bm25 is not None and bm25.n_docs != len(ids):
+            raise ValueError(
+                "bm25.msbm incohérent avec l'index (nombre de documents différent) — "
+                "reconstruire avec `mosaic build --hybride`"
+            )
         # acc est déjà lissé sur disque (build/add l'ont matérialisé) : on ne
         # réapplique PAS smooth() ici, seulement au prochain add() (re-finalize).
         return cls(
@@ -431,6 +454,7 @@ class Index:
             relations_manifest=relations_manifest,
             facettes=facettes_module.charger(index_dir),
             profil=meta.get("profil"),
+            bm25=bm25,
         )
 
     def _save(self) -> None:
@@ -462,6 +486,8 @@ class Index:
             )  # invariant : jamais de vecteurs sans nom de modèle
             extra_meta["rerank_model"] = self.rerank_model
             save_rerank(self.index_dir, self.rerank_vecs, self.rerank_model)
+        if self.bm25 is not None:
+            save_bm25(self.index_dir, self.bm25)
         if self.relations_mat is not None:
             assert (
                 self.relations_norms is not None
@@ -588,6 +614,10 @@ class Index:
         if new_rerank_vec is not None:
             assert self.rerank_vecs is not None  # non-None dès que new_rerank_vec l'est
             self.rerank_vecs = np.vstack([self.rerank_vecs, new_rerank_vec])
+        if self.bm25 is not None:
+            # même flux de tokens que la ligne ajoutée à la matrice grille (invariant du
+            # canal : les deux voient le même monde, cf. build)
+            self.bm25.add_doc(tokens)
         if self.relations_mat is not None:
             # add() n'a pas de notion de corpus_dir (cf. commentaire index_paths plus haut) :
             # entities_from_path(file.name) n'a donc jamais de segment de dossier -> canal
@@ -616,8 +646,13 @@ class Index:
         rerank_depth: int = 50,
         type_filtre: str | None = None,
         recence: float = 0.0,
+        fusion: bool = False,
     ) -> list[dict]:
-        """`type_filtre` / `recence` (facettes, opt-in) : filtre exact par type de document et
+        """`fusion=True` : fusion RRF à trois canaux (grille + BM25 + embeddings), validée
+        par la mesure — nécessite un index construit avec --hybride (cf. queries.search_fusion).
+        Incompatible avec `rerank` (le canal embeddings est DÉJÀ un canal plein de la fusion).
+
+        `type_filtre` / `recence` (facettes, opt-in) : filtre exact par type de document et
         fusion sémantique/fraîcheur — voir mosaic.facettes. Sans facettes.json (index antérieur),
         ces options sont refusées loud (reconstruire l'index les active).
 
@@ -625,12 +660,19 @@ class Index:
         devis/commande — >= 5 caractères mixtes ou >= 6 chiffres), les documents qui portent ce
         code EXACTEMENT prennent la tête (`ref_exacte`). Se désactive silencieusement sans
         facettes.json (rien n'a été demandé explicitement)."""
+        if fusion and rerank:
+            raise ValueError(
+                "fusion et rerank sont exclusifs : la fusion intègre déjà le canal "
+                "embeddings comme canal plein"
+            )
         refs_requete = (
             facettes_module.refs_du_texte(text, (self.profil or {}).get("refs"))
             if self.facettes
             else []
         )
         if type_filtre is None and recence == 0.0 and not refs_requete:
+            if fusion:
+                return queries.search_fusion(self, text, k)
             return queries.search(self, text, k, rerank, rerank_lambda, rerank_depth)
         if not self.facettes:
             raise ValueError(
@@ -644,7 +686,11 @@ class Index:
         # surcoût est négligeable : le produit matriciel complet domine, indépendant de k.
         profond = bool(type_filtre) or bool(refs_requete)
         pool = min(len(self.ids), max(k * 40, 400)) if profond else max(k * 5, 50)
-        hits = queries.search(self, text, pool, rerank, rerank_lambda, rerank_depth)
+        hits = (
+            queries.search_fusion(self, text, pool)
+            if fusion
+            else queries.search(self, text, pool, rerank, rerank_lambda, rerank_depth)
+        )
         return facettes_module.appliquer(
             hits,
             self.facettes,
@@ -735,6 +781,10 @@ class Index:
             s["canal_document"] = "inactif (pas de table)"
         if self.rerank_vecs is not None:
             s["rerank_model"] = self.rerank_model
+        if (
+            self.bm25 is not None
+        ):  # index hybride : la fusion trois canaux est disponible
+            s["hybride"] = True
         if self.relations_mat is not None:
             s["relations"] = True
         if (

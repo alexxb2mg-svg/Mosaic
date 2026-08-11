@@ -171,6 +171,14 @@ def main(argv: list[str] | None = None) -> int:
         "pour permettre `search --rerank` (défaut désactivé, nécessite model2vec)",
     )
     p_build.add_argument(
+        "--hybride",
+        action="store_true",
+        help="index hybride : stocke les postings BM25 (bm25.msbm) ET les vecteurs "
+        "model2vec (implique --rerank-vectors) pour permettre `search --fusion` — la "
+        "fusion RRF à trois canaux validée au banc Alloprof (0.517 R@10 contre 0.498 "
+        "pour le standard BM25+embeddings)",
+    )
+    p_build.add_argument(
         "--no-path-tokens",
         action="store_true",
         help="désactive l'injection des tokens du chemin relatif en tête du document "
@@ -226,6 +234,12 @@ def main(argv: list[str] | None = None) -> int:
     p_search.add_argument("query", nargs="?", default=None)
     p_search.add_argument("index")
     p_search.add_argument("--top", type=int, default=10)
+    p_search.add_argument(
+        "--fusion",
+        action="store_true",
+        help="fusion RRF à trois canaux (grille + BM25 + embeddings) — nécessite un "
+        "index construit avec --hybride ; exclusif avec --rerank",
+    )
     p_search.add_argument(
         "--rerank",
         action="store_true",
@@ -546,6 +560,7 @@ def main(argv: list[str] | None = None) -> int:
                 ingest_cache_dir=ingest_cache_dir,
                 doc_weight=doc_weight,
                 rerank_vectors=args.rerank_vectors,
+                hybride=args.hybride,
                 index_paths=not args.no_path_tokens,
                 ocr=args.ocr,
                 relations=args.relations,
@@ -585,6 +600,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError(
                     "--connecteurs est incompatible avec --batch et --rerank"
                 )
+            if args.fusion and args.connecteurs:
+                raise ValueError("--fusion est incompatible avec --connecteurs")
             if args.connecteurs and (args.type_filtre or args.recence):
                 raise ValueError("--connecteurs est incompatible avec --type/--recence")
             if args.batch:
@@ -606,6 +623,7 @@ def main(argv: list[str] | None = None) -> int:
                             rerank_depth=rerank_depth,
                             type_filtre=args.type_filtre,
                             recence=args.recence,
+                            fusion=args.fusion,
                         )
                     )
             elif args.connecteurs:
@@ -626,6 +644,7 @@ def main(argv: list[str] | None = None) -> int:
                         rerank_depth=rerank_depth,
                         type_filtre=args.type_filtre,
                         recence=args.recence,
+                        fusion=args.fusion,
                     )
                 )
         elif args.cmd == "like":

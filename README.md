@@ -141,6 +141,24 @@ What this benchmark taught us — kept here because it is the honest story:
 - **Determinism holds at scale.** Two independent builds returned identical metrics to the
   fourth decimal (0.3848 / 0.2593).
 
+### Native three-channel fusion (`--hybride` / `--fusion`)
+
+The winning architecture above is built in — one flag at build time, one at search time:
+
+```bash
+mosaic build ./docs -o ./index --hybride     # BM25 postings + model2vec vectors
+mosaic search "your query" ./index --fusion  # RRF over all three channels
+```
+
+`--hybride` stores BM25 postings (`bm25.msbm`) over the same token stream the grid sees
+(canonicalization + collocations) and implies `--rerank-vectors`. It is opt-in because a
+bag of words reveals more about your documents than the grid does — the storage trade-off
+is yours to make, never a silent default. `--fusion` ranks the whole corpus per channel,
+fuses by Reciprocal Rank Fusion (K=60), drops any channel with no signal on the query,
+and reports each result's per-channel rank for explainability. Because the grid+BM25 duo
+*without* embeddings measured below BM25 alone (0.460 < 0.482), fusion requires all three
+channels and fails loudly otherwise.
+
 ### Embeddings (optional but recommended)
 
 The third encoding channel uses a static [model2vec](https://github.com/MinishLab/model2vec)

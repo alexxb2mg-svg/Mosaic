@@ -5,16 +5,21 @@ import os
 import struct
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from mosaic.profiles import Profiles
+
+if TYPE_CHECKING:
+    from mosaic.bm25 import Bm25
 
 _HEADER = struct.Struct("<4sBBHHBBI")
 _MAGIC_DOCS = b"MSEI"
 _MAGIC_VOCAB = b"MSEV"
 _MAGIC_RERANK = b"MSRV"
 _MAGIC_RELATIONS = b"MSRL"
+_MAGIC_BM25 = b"MSBM"
 _VERSION_MAJOR = 1
 _VMIN_DOCS = 0
 _VMIN_RELATIONS = 0
@@ -23,6 +28,7 @@ _VMIN_RELATIONS = 0
 # tout ré-apprendre depuis le corpus. v1.0 (vmin=0) reste lisible en lecture seule.
 _VMIN_VOCAB = 1
 _VMIN_RERANK = 0
+_VMIN_BM25 = 0
 
 
 def _write(
@@ -153,6 +159,56 @@ def load_rerank(path: Path) -> tuple[np.ndarray, str] | None:
         raise ValueError(f"fichier {file.name} tronqué ou corrompu")
     mat = np.frombuffer(raw, dtype=np.float16, count=n * dim).reshape(n, dim).copy()
     return mat, str(meta.get("model", ""))
+
+
+def save_bm25(path: Path, bm25: "Bm25") -> None:
+    """bm25.msbm (fusion hybride) : postings BM25 par terme, même ordre de documents que
+    `ids` de docs.msei. Le vocabulaire (liste de termes, ordre = colonnes) voyage dans le
+    meta JSON comme `ids` dans docs.msei ; les tableaux suivent dans l'ordre fixe
+    indptr(int64, V+1) · doc_idx(int32, nnz) · tf(int32, nnz) · doc_lens(int32, n).
+    Le triplet grid du header n'a pas de sens ici -> (0, 0, 0), comme rerank.msrv."""
+    nnz = int(bm25.indptr[-1])
+    _write(
+        path / "bm25.msbm",
+        _MAGIC_BM25,
+        (0, 0, 0),
+        bm25.n_docs,
+        {"vocab": bm25.vocab_termes, "nnz": nnz},
+        [
+            bm25.indptr.astype(np.int64),
+            bm25.doc_idx.astype(np.int32),
+            bm25.tf.astype(np.int32),
+            bm25.doc_lens.astype(np.int32),
+        ],
+        vmin=_VMIN_BM25,
+    )
+
+
+def load_bm25(path: Path) -> "Bm25 | None":
+    """None si bm25.msbm absent (index construit sans --hybride, dégradation propre).
+    ValueError si présent mais corrompu/tronqué — même contrat que load_docs/load_rerank."""
+    from mosaic.bm25 import Bm25  # import local : store ne dépend du module qu'ici
+
+    file = path / "bm25.msbm"
+    if not file.is_file():
+        return None
+    _grid, n, meta, vmin, raw = _read(file, _MAGIC_BM25)
+    if vmin != _VMIN_BM25:
+        raise ValueError(f"{file.name} : version mineure non supportée (vmin={vmin})")
+    termes = [str(t) for t in meta["vocab"]]
+    v, nnz = len(termes), int(meta["nnz"])
+    expected = 8 * (v + 1) + 4 * nnz + 4 * nnz + 4 * n
+    if len(raw) < expected:
+        raise ValueError(f"fichier {file.name} tronqué ou corrompu")
+    off = 0
+    indptr = np.frombuffer(raw, dtype=np.int64, count=v + 1, offset=off).copy()
+    off += 8 * (v + 1)
+    doc_idx = np.frombuffer(raw, dtype=np.int32, count=nnz, offset=off).copy()
+    off += 4 * nnz
+    tf = np.frombuffer(raw, dtype=np.int32, count=nnz, offset=off).copy()
+    off += 4 * nnz
+    doc_lens = np.frombuffer(raw, dtype=np.int32, count=n, offset=off).copy()
+    return Bm25(termes, indptr, doc_idx, tf, doc_lens)
 
 
 def save_relations(

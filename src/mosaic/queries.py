@@ -18,6 +18,7 @@ from mosaic.docio import _EXTS, _read_text, _read_text_convertible
 from mosaic.encoder import _signed_counts, encode, quantize
 from mosaic.lexicon import canonicalize
 from mosaic import ingest
+from mosaic.meta import K_RRF_DEFAULT
 from mosaic.relations import bind, entites_du_canal, normalize_entity
 from mosaic.tokenize import tokenize
 
@@ -86,6 +87,70 @@ def _cos_all(idx: "Index", text: str) -> np.ndarray:
     denom = idx.norms * np.float32(qnorm)
     denom = np.where(denom == 0, np.float32(1.0), denom)
     return scores.astype(np.float32) / denom
+
+
+def search_fusion(idx: "Index", text: str, k: int = 10) -> list[dict]:
+    """Fusion RRF à TROIS canaux — grille (sémantique) + BM25 (lexical exact) + embeddings
+    (model2vec) — validée par la mesure (banc Alloprof : trio 0.517 R@10 > standard du
+    marché BM25+embeddings 0.498 > chaque canal seul). Le duo grille+BM25 sans embeddings
+    a été mesuré NUISIBLE (0.460 < BM25 seul 0.482) : la fusion exige donc les trois
+    canaux — index construit avec --hybride, refus net sinon (jamais un duo silencieux).
+
+    Chaque canal classe TOUT le corpus ; RRF (même constante K que mosaic.meta) somme
+    1/(K+rang). Un canal SANS signal sur cette requête (tous scores nuls : requête hors
+    vocabulaire pour BM25, annulée pour la grille) est écarté de la somme — pas de bruit
+    de rang injecté par un canal aveugle. Déterministe : égalités départagées par ordre
+    de document (argsort stable). `rangs` expose le rang 1-based par canal (explicabilité)."""
+    if idx.bm25 is None:
+        raise ValueError(
+            "index sans bm25.msbm : reconstruire avec `mosaic build --hybride` "
+            "pour utiliser la fusion"
+        )
+    if idx.rerank_vecs is None:
+        raise ValueError(
+            "index sans rerank.msrv : reconstruire avec `mosaic build --hybride` "
+            "pour utiliser la fusion"
+        )
+    if not rerank_module.available():
+        raise ValueError(
+            'la fusion nécessite model2vec — pip install "model2vec==0.8.2"'
+        )
+    n = len(idx.ids)
+    if n == 0:
+        return []
+    tokens = merge(
+        merge(canonicalize(tokenize(text), idx._compiled), idx.colloc), idx.colloc
+    )
+    canaux: list[tuple[str, np.ndarray]] = []
+    cos = _cos_all(idx, text)
+    if np.any(cos):
+        canaux.append(("grille", cos))
+    bm = idx.bm25.scores(tokens)
+    if np.any(bm):
+        canaux.append(("bm25", bm))
+    emb = idx.rerank_vecs @ rerank_module.encode_query(text)
+    if np.any(emb):
+        canaux.append(("embed", emb))
+    if not canaux:
+        return []
+    rrf = np.zeros(n, dtype=np.float64)
+    contrib = 1.0 / (K_RRF_DEFAULT + np.arange(1, n + 1, dtype=np.float64))
+    rangs: dict[str, np.ndarray] = {}
+    for nom, scores in canaux:
+        ordre = np.argsort(-scores, kind="stable")
+        rrf[ordre] += contrib
+        r = np.empty(n, dtype=np.int64)
+        r[ordre] = np.arange(1, n + 1)
+        rangs[nom] = r
+    top = np.argsort(-rrf, kind="stable")[:k]
+    return [
+        {
+            "id": idx.ids[i],
+            "score": round(float(rrf[i]), 6),
+            "rangs": {nom: int(rangs[nom][i]) for nom, _ in canaux},
+        }
+        for i in top
+    ]
 
 
 def search_connecteurs(
