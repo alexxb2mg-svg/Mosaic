@@ -106,6 +106,37 @@ capacity limits, multi-hop traversal viability (pure-value binding, cleanup per 
 conformal abstention, held-out deterministic ground truth — every mechanism was measured
 before it was built.
 
+## Measured footprint & performance
+
+Real numbers, measured on production indexes (Windows, plain CPU, default 64×64×3 grid):
+
+| Metric | Small index (579 docs) | Large index (18,070 docs) |
+|---|---|---|
+| Disk total | 1.55 GB | 3.79 GB |
+| — document grids (`docs.msei`, int8) | **12.1 KB/doc** | 12.1 KB/doc |
+| — co-occurrence profiles (`vocab.msev`) | 48.4 KB/word × 31k words | 48.2 KB/word × 72k words |
+| Warm search latency (index open) | **27 ms** | 887 ms |
+| Cold CLI call (incl. Python startup) | 1.9 s | — |
+| Process RAM with index open | — | **373 MB** |
+
+How to read this:
+
+- **A document costs ~12 KB.** The per-document grid is tiny; disk is dominated by the
+  **vocabulary** (one 48 KB float32 profile per distinct word). Index size ≈ vocab × 48 KB.
+- **RAM does not pay for disk.** Indexes open as lazy memory-maps: the 3.8 GB index runs in
+  ~370 MB of process RAM — only the profile rows your queries touch are ever read.
+- **Latency scales linearly with corpus size** (int8 cosine over all documents). The MCP
+  server keeps indexes open (warm path); the CLI pays Python startup on every call.
+- **Levers if you need smaller/faster:** `--grid 32x32` divides every vector cost by ~4;
+  `--smoothing-rank 0` skips the SVD (faster builds, lower recall); skipping
+  `--rerank-vectors` and embeddings keeps the engine pure and minimal.
+- One-time shared artifacts: the optional embedding table is **84 MB** (built locally by
+  `scripts/prepare_potion.py`, shared across all indexes).
+- Belief memory: ~1 ms per assert/read, **82 MB per 50,000 facts** (measured,
+  `research/bench_croyance_echelle.py`).
+
+Every number above is reproducible: build the bundled `bench/corpus` and time it yourself.
+
 ## Design principles
 
 1. **Deterministic or explicit.** Same input, same output, any machine. What cannot be
