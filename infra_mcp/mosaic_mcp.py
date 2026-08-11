@@ -343,6 +343,7 @@ def _get_index(state: dict, domaine: str) -> Index:
     # verify_embeddings=False : chemin recherche/consultation uniquement, jamais de mutation
     # (aucun outil MCP n'appelle add()) — cf. Index.open() et la CLI `mosaic search`.
     idx = Index.open(index_dir, verify_embeddings=False)
+    idx.chauffer_recherche()  # process long : RAM contre latence (x13 mesuré)
     cache[domaine] = idx
     cache_mtime[domaine] = current_mtime
     return idx

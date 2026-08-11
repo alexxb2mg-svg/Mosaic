@@ -82,7 +82,7 @@ def _cos_all(idx: "Index", text: str) -> np.ndarray:
     )
     if qnorm == 0.0:
         return np.zeros(n, dtype=np.float32)
-    scores = idx.mat @ q.astype(np.int32)
+    scores = idx.mat_recherche @ q.astype(np.float32)
     denom = idx.norms * np.float32(qnorm)
     denom = np.where(denom == 0, np.float32(1.0), denom)
     return scores.astype(np.float32) / denom
@@ -132,7 +132,7 @@ def _rank_and_rerank(
     ce qui permet à `search_like` d'exclure le(s) document(s) source(s) d'un id interne."""
     if qnorm == 0.0 or not len(idx.ids):
         return []
-    scores = idx.mat @ q.astype(np.int32)
+    scores = idx.mat_recherche @ q.astype(np.float32)
     denom = idx.norms * np.float32(qnorm)
     denom[denom == 0] = 1.0
     cos = scores.astype(np.float32) / denom

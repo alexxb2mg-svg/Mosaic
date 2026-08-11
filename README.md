@@ -129,7 +129,8 @@ Real numbers, measured on production indexes (Windows, plain CPU, default 64×64
 | Disk total | 1.55 GB | 3.79 GB |
 | — document grids (`docs.msei`, int8) | **12.1 KB/doc** | 12.1 KB/doc |
 | — co-occurrence profiles (`vocab.msev`) | 48.4 KB/word × 31k words | 48.2 KB/word × 72k words |
-| Warm search latency (index open) | **27 ms** | 887 ms |
+| Warm search latency (MCP server, float32 cache) | **27 ms** | **63 ms** |
+| Warm search latency (memory-lean int8 path) | 27 ms | 832 ms |
 | Cold CLI call (incl. Python startup) | 1.9 s | — |
 | Process RAM with index open | — | **373 MB** |
 | Full build, embeddings + reranker + SVD (40 docs) | 14.5 s | scales ~linearly |
@@ -174,9 +175,9 @@ roadmap.
 - **Bag-of-words semantics.** Word order beyond learned collocations is not encoded; it
   retrieves by lexical-semantic content, not fine-grained syntax. A large transformer will
   beat it on subtle nuance — that is the price of sovereignty, and the reranker narrows it.
-- **Linear scan latency.** Search is an int8 cosine over all documents: excellent up to
-  tens of thousands of documents (27 ms @ 579 docs, ~0.9 s @ 18k docs warm), not designed
-  for millions.
+- **Linear scan latency.** Search is a full-corpus cosine: excellent up to tens of
+  thousands of documents (63 ms @ 18k docs on the warm server path), not designed for
+  millions.
 - **Disk is vocabulary-driven** (~48 KB per distinct word). Very large vocabularies mean
   multi-GB indexes — RAM stays low (lazy memmaps), but budget the disk.
 - **The engine recalls; it does not read.** It returns the right documents and why — your

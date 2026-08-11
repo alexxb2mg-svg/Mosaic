@@ -138,6 +138,24 @@ class Index:
         # Profil d'index (paramétrage déclaratif métier) — None = défauts historiques.
         # Persisté dans le meta : build/add/search relisent LE MÊME profil (règle 1).
         self.profil: dict | None = profil
+        # Cache float32 OPTIONNEL de la matrice documents (chemin chaud). Le produit
+        # int8 @ float upcaste toute la matrice À CHAQUE requête (mesuré : 577 ms sur
+        # 18k docs contre 51 ms pré-converti — 11x). Trade-off explicite RAM vs latence :
+        # None par défaut (CLI froide, RAM minimale) ; activer via chauffer_recherche()
+        # (le serveur MCP le fait — c'est lui le chemin chaud). Invalidé par add().
+        self._mat32: np.ndarray | None = None
+
+    def chauffer_recherche(self) -> None:
+        """Pré-convertit la matrice documents en float32 (RAM x4 sur ce bloc, recherche
+        ~11x plus rapide sur les gros index). À réserver aux process longs (serveur)."""
+        if self._mat32 is None:
+            self._mat32 = self.mat.astype(np.float32)
+
+    @property
+    def mat_recherche(self) -> np.ndarray:
+        """La matrice à utiliser pour le produit scalaire de recherche : le cache float32
+        s'il a été chauffé, sinon la matrice int8 (sobre, upcast payé par requête)."""
+        return self._mat32 if self._mat32 is not None else self.mat
 
     # -- construction -------------------------------------------------------
 
@@ -559,6 +577,7 @@ class Index:
             weights=self.weights,
             doc_weight=self.doc_weight,
         )
+        self._mat32 = None  # le cache chaud ne doit jamais servir un index périmé
         self.mat = np.vstack([self.mat, q[np.newaxis, :]])
         self.norms = np.append(self.norms, np.float32(n))
         self.ids.append(file.name)
