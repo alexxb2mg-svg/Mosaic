@@ -39,7 +39,7 @@ SERVER_VERSION = "1.6.0"
 # aucune négociation dynamique ici (serveur minimal, un seul comportement).
 PROTOCOL_VERSION = "2024-11-05"
 
-# domaine -> la racine des index/index_<domaine> 
+# domaine -> la racine des index/index_<domaine>
 # Les domaines sont DÉCOUVERTS dynamiquement : tout dossier `index_<domaine>` sous la racine
 # des index est un domaine interrogeable (plus de liste en dur — un nouvel index déposé par un
 # script ou un rebuild devient accessible sans toucher au serveur). DEFAULT_DATA_DIR reste le
