@@ -711,15 +711,15 @@ def test_index_paths_meta_round_trip(tmp_path):
 
 def test_index_paths_survit_a_add(tmp_path):
     idx = Index.build(_corpus_nomme(tmp_path), tmp_path / "idx", grid=GRID)
-    extra = tmp_path / "2026" / "09.2026" / "D26090001_DOUBLET_devis.md"
+    extra = tmp_path / "2026" / "09.2026" / "D26090001_DURAND_devis.md"
     extra.parent.mkdir(parents=True)
     extra.write_text("fourniture pose cablage protection", encoding="utf-8")
     idx.add(extra)
-    hits = idx.search("doublet", k=1)
+    hits = idx.search("durand", k=1)
     assert (
-        hits[0]["id"] == "D26090001_DOUBLET_devis.md"
+        hits[0]["id"] == "D26090001_DURAND_devis.md"
     )  # add() ne garde que le nom du fichier
-    assert hits[0]["score"] > 0.3  # match net (contenu ne mentionne jamais « doublet »)
+    assert hits[0]["score"] > 0.3  # match net (contenu ne mentionne jamais « durand »)
 
 
 def test_no_path_tokens_survit_a_add(tmp_path):
@@ -729,11 +729,11 @@ def test_no_path_tokens_survit_a_add(tmp_path):
     idx = Index.build(
         _corpus_nomme(tmp_path), tmp_path / "idx", grid=GRID, index_paths=False
     )
-    extra = tmp_path / "2026" / "09.2026" / "D26090001_DOUBLET_devis.md"
+    extra = tmp_path / "2026" / "09.2026" / "D26090001_DURAND_devis.md"
     extra.parent.mkdir(parents=True)
     extra.write_text("fourniture pose cablage protection", encoding="utf-8")
     idx.add(extra)
-    assert "doublet" not in idx.profiles.rows
+    assert "durand" not in idx.profiles.rows
 
 
 def test_add_ne_pollue_pas_le_vocabulaire_avec_les_composants_du_chemin_absolu(
