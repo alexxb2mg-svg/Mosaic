@@ -46,7 +46,12 @@ def _rrf(*classements: list[str]) -> list[str]:
     return sorted(scores, key=scores.__getitem__, reverse=True)[:10]
 
 
-def main(corpus_dir: str, queries_path: str) -> None:
+def main(
+    corpus_dir: str,
+    queries_path: str,
+    weights: tuple[float, float, float] = (0.25, 0.15, 0.60),
+    index_paths: bool = True,
+) -> None:
     corpus = Path(corpus_dir)
     queries = [
         json.loads(line)
@@ -68,7 +73,8 @@ def main(corpus_dir: str, queries_path: str) -> None:
         embeddings=Embeddings.load(Path("data_externes/potion_fr.msee"), abtt=2),
         embeddings_path=Path("data_externes/potion_fr.msee"),
         abtt=2,
-        weights=(0.25, 0.15, 0.60),
+        weights=weights,
+        index_paths=index_paths,
     )
 
     par_config: dict[str, list[list[str]]] = {
@@ -101,12 +107,38 @@ def main(corpus_dir: str, queries_path: str) -> None:
         entry = _metrics(results, relevant)
         for qtype in ("lexical", "semantique"):
             sel = [i for i, q in enumerate(queries) if q.get("type") == qtype]
-            entry[qtype] = _metrics(
-                [results[i] for i in sel], [relevant[i] for i in sel]
-            )
+            # Jeu non typé (ex. bench/alloprof.py) : aucun sous-ensemble — statistics.mean
+            # planterait sur une liste vide, on omet la clé plutôt que de planter le banc.
+            if sel:
+                entry[qtype] = _metrics(
+                    [results[i] for i in sel], [relevant[i] for i in sel]
+                )
         report[config] = entry
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="fusion_bench")
+    parser.add_argument("corpus")
+    parser.add_argument("queries")
+    parser.add_argument(
+        "--weights",
+        default="0.25,0.15,0.60",
+        help="a,b,g du canal mosaic — passer les poids CALIBRÉS du corpus mesuré, "
+        "sinon la fusion juge mosaic dans une configuration qui n'est pas la sienne",
+    )
+    parser.add_argument(
+        "--no-path-tokens",
+        action="store_true",
+        help="même drapeau que la CLI/run_bench : noms de fichiers opaques (ex. UUID)",
+    )
+    args = parser.parse_args()
+    a, b, g = (float(x) for x in args.weights.split(","))
+    main(
+        args.corpus,
+        args.queries,
+        weights=(a, b, g),
+        index_paths=not args.no_path_tokens,
+    )

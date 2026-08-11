@@ -7,6 +7,10 @@ build/
 # local artifacts (embedding tables, downloaded models, built indexes)
 data_externes/
 index_*/
+_bench_index_*/
+
+# downloaded benchmark data (CC BY-NC-SA, never redistributed — see bench/alloprof.py)
+bench/alloprof/
 
 # local ty config (machine-specific; see ci.yml for the CI setup)
 ty.toml

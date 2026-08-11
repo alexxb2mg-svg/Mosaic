@@ -142,6 +142,13 @@ def main() -> None:
         help="profondeur du rerank, défaut moteur (50) si omis",
     )
     parser.add_argument(
+        "--no-path-tokens",
+        action="store_true",
+        help="n'indexe pas les tokens du chemin de fichier (même drapeau que la CLI) — "
+        "indispensable quand les noms de fichiers sont opaques (ex. UUID Alloprof) : "
+        "les indexer injecterait du bruit hexadécimal dans les grilles et le vocabulaire",
+    )
+    parser.add_argument(
         "--avec-echecs",
         action="store_true",
         help="ajoute les requêtes de bench/echecs_reels.jsonl (banc vivant, v1.6 §F, type "
@@ -238,6 +245,8 @@ def main() -> None:
     # demande pas).
     if args.doc_weight is not None:
         build_kwargs["doc_weight"] = _parse_doc_weight(args.doc_weight)
+    if args.no_path_tokens:
+        build_kwargs["index_paths"] = False
     # --rerank implique --rerank-vectors au build : sans rerank.msrv, idx.search(rerank=True)
     # échouerait — le banc n'a pas de sens à demander la recherche sans le construire.
     # --rerank-lambda/--rerank-depth validés MAINTENANT (avant le build, potentiellement long) :
@@ -281,11 +290,16 @@ def main() -> None:
                 )
         report[name] = entry
 
-    report["verdict_v1"] = report["mosaic"]["recall@10"] >= report["bm25"][
-        "recall@10"
-    ] and report["mosaic"].get("semantique", {}).get("recall@10", 0) > report[
-        "bm25"
-    ].get("semantique", {}).get("recall@10", 0)
+    # verdict_v1 n'a de sens que si le jeu de requêtes distingue les pièges sémantiques
+    # (type "semantique") : sur un jeu non typé (ex. bench/alloprof.py), la clause
+    # sémantique comparerait 0 > 0 et rendrait un verdict faussement négatif — on
+    # l'omet alors plutôt que de publier un faux échec.
+    if any(q.get("type") == "semantique" for q in queries):
+        report["verdict_v1"] = report["mosaic"]["recall@10"] >= report["bm25"][
+            "recall@10"
+        ] and report["mosaic"].get("semantique", {}).get("recall@10", 0) > report[
+            "bm25"
+        ].get("semantique", {}).get("recall@10", 0)
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
