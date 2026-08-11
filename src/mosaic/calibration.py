@@ -57,9 +57,17 @@ SEUIL_REQUETES_FIABLES = 10
 GAIN_MINIMAL_MRR = 0.02  # en-deçà, le rapport dit « gardez le défaut »
 
 
-def _preparer(corpus_dir: Path, lexicon: dict | None, smoothing_rank: int, grid):
+def _preparer(
+    corpus_dir: Path,
+    lexicon: dict | None,
+    smoothing_rank: int,
+    grid,
+    index_paths: bool = True,
+):
     """Lecture + tokenisation + collocations + profils, UNE fois (indépendant des poids).
-    Séquence identique à Index.build (à garder en phase)."""
+    Séquence identique à Index.build (à garder en phase) — y compris `index_paths` :
+    calibrer avec les tokens de chemin un corpus qui sera construit sans (noms de
+    fichiers opaques, ex. UUID) choisirait les poids sur un espace qui n'existera pas."""
     dim = grid[0] * grid[1] * grid[2]
     files = sorted(
         p
@@ -77,7 +85,15 @@ def _preparer(corpus_dir: Path, lexicon: dict | None, smoothing_rank: int, grid)
             text = _read_text_convertible(p, None, ocr=False)
             if text is None:
                 continue
-        raw.append((doc_id, _path_tokens(doc_id) + tokenize(text)))
+        content_tokens = tokenize(text)
+        raw.append(
+            (
+                doc_id,
+                _path_tokens(doc_id) + content_tokens
+                if index_paths
+                else content_tokens,
+            )
+        )
     if lexicon is None:
         lexicon = load_lexicon()
     compiled = compile_lexicon(lexicon)
@@ -157,6 +173,7 @@ def calibrer(
     grid=GRID_DEFAULT,
     k: int = 10,
     verite_auto: bool = False,
+    index_paths: bool = True,
 ) -> dict:
     """Balaye la grille de poids sur le corpus, évalue chaque configuration contre les
     requêtes-vérité, et rend un rapport : classement, gagnante, gain vs défaut, et la
@@ -187,7 +204,7 @@ def calibrer(
     )
     dim_grid = grid[0] * grid[1] * grid[2]
     docs, profiles, colloc, lexicon = _preparer(
-        Path(corpus_dir), None, smoothing_rank, grid
+        Path(corpus_dir), None, smoothing_rank, grid, index_paths=index_paths
     )
     if not docs:
         raise ValueError(f"corpus vide (aucun document lisible) : {corpus_dir}")

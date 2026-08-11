@@ -473,6 +473,13 @@ def main(argv: list[str] | None = None) -> int:
     p_calib.add_argument("--embeddings", default=None)
     p_calib.add_argument("--abtt", type=int, default=0)
     p_calib.add_argument(
+        "--no-path-tokens",
+        action="store_true",
+        help="calibre SANS les tokens de chemin — à utiliser si l'index visé sera "
+        "construit avec ce même drapeau (noms de fichiers opaques) : calibrer sur un "
+        "espace différent de celui du build choisirait des poids pour un autre monde",
+    )
+    p_calib.add_argument(
         "--explique",
         action="store_true",
         help="verdict en clair (mode humain) au lieu du rapport JSON",
@@ -757,6 +764,7 @@ def main(argv: list[str] | None = None) -> int:
                 embeddings_path=Path(args.embeddings) if args.embeddings else None,
                 abtt=_parse_int_nonnegative(args.abtt, "abtt"),
                 verite_auto=args.verite_auto,
+                index_paths=not args.no_path_tokens,
             )
             if args.explique:
                 print(expliquer_calibration(rapport, langue=args.langue))

@@ -138,3 +138,19 @@ def test_verite_auto_exclusif_avec_requetes(tmp_path):
         calibrer(_corpus_long(tmp_path), REQUETES, verite_auto=True, grid=GRID)
     with pytest.raises(ValueError, match="requêtes-vérité|verite_auto"):
         calibrer(_corpus_long(tmp_path), None, grid=GRID)
+
+
+def test_calibrer_index_paths_false_ignore_les_tokens_de_chemin(tmp_path):
+    """`index_paths=False` doit calibrer sur le MÊME espace qu'un build --no-path-tokens :
+    une requête qui ne matche QUE le nom de fichier trouve avec les tokens de chemin,
+    plus rien sans eux — si les deux modes rendaient le même score, le paramètre serait
+    décoratif et la calibration resterait hors-phase avec le build."""
+    c = tmp_path / "corpus"
+    c.mkdir()
+    (c / "zzximo.md").write_text("contenu generique sans le terme", encoding="utf-8")
+    (c / "autre.md").write_text("document voisin egalement generique", encoding="utf-8")
+    requetes = [{"query": "zzximo", "relevant": ["zzximo.md"]}]
+
+    avec = calibrer(c, requetes, grid=GRID, smoothing_rank=0)
+    sans = calibrer(c, requetes, grid=GRID, smoothing_rank=0, index_paths=False)
+    assert avec["defaut"]["mrr"] > sans["defaut"]["mrr"]
