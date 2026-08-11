@@ -7,6 +7,8 @@ always produces the same index, bit for bit. Every document becomes a small **64
 grid** — a mosaic — and searching means comparing grids: two texts about the same thing get
 two grids that are geometrically close.
 
+<p align="center"><img src="docs/grid_example.png" width="256" alt="A document, as Mosaic sees it: a 64x64 color grid"><br><em>A real document from the bundled benchmark, as the engine sees it.</em></p>
+
 ## The idea
 
 The engine does everything **mechanical**: index, retrieve, remember, and *measure its own
@@ -64,7 +66,19 @@ mosaic search "how do I wire the differential breaker" ./index_docs --top 5
 mosaic explain <doc_id> ./index_docs --query "..."   # why did it match?
 ```
 
-Everything is JSON on stdout — built for agents first, humans second.
+Everything is JSON on stdout — built for agents first, humans second. Real output from
+the bundled benchmark (paraphrased queries, no keyword overlap with the documents):
+
+```bash
+$ mosaic search "melanger de l'huile et un jaune pour une sauce onctueuse" ./index_bench --rerank
+[{"id": "04_mayonnaise.md", "score": 0.4988, "score_rerank": 0.5507}, ...]
+
+$ mosaic search "mon chocolat fondu redevient terne avec des marbrures" ./index_bench --rerank
+[{"id": "31_chocolat_temperage.md", "score": 0.3000, "score_rerank": 0.3624}, ...]
+```
+
+**Requirements:** Python ≥ 3.12, any OS (CI runs Linux; developed on Windows). No GPU, no
+network access at runtime. Core dependency: numpy only.
 
 ### Try the bundled benchmark
 
@@ -118,6 +132,7 @@ Real numbers, measured on production indexes (Windows, plain CPU, default 64×64
 | Warm search latency (index open) | **27 ms** | 887 ms |
 | Cold CLI call (incl. Python startup) | 1.9 s | — |
 | Process RAM with index open | — | **373 MB** |
+| Full build, embeddings + reranker + SVD (40 docs) | 14.5 s | scales ~linearly |
 
 How to read this:
 
@@ -136,6 +151,59 @@ How to read this:
   `research/bench_croyance_echelle.py`).
 
 Every number above is reproducible: build the bundled `bench/corpus` and time it yourself.
+
+## Language support (read this before installing)
+
+Mosaic is currently **French-first**: the tokenizer, stopword list, bundled lexicons and the
+recommended embedding table are built for French corpora.
+
+- **French** — native, fully supported. All benchmarks above are French.
+- **English queries over French documents** — supported through a deterministic ~11.8k-term
+  lexicon bridge; measured equivalent to the native French query when the terms are covered.
+- **Other Latin languages** (ES/IT/PT/DE) — partially usable (Latin tokenizer), no bundled
+  lexicon yet.
+- **Non-Latin scripts (Arabic, CJK…)** — **not supported yet** (the tokenizer is
+  Latin-only); a query returns an empty list, not bad results.
+
+The **CLI is French-first** too (`mosaic calibrer`, `chemin`, `actuel`, `--explique`…).
+Human-mode explanations are bilingual (`--langue en`); English command aliases are on the
+roadmap.
+
+## Limitations — the honest list
+
+- **Bag-of-words semantics.** Word order beyond learned collocations is not encoded; it
+  retrieves by lexical-semantic content, not fine-grained syntax. A large transformer will
+  beat it on subtle nuance — that is the price of sovereignty, and the reranker narrows it.
+- **Linear scan latency.** Search is an int8 cosine over all documents: excellent up to
+  tens of thousands of documents (27 ms @ 579 docs, ~0.9 s @ 18k docs warm), not designed
+  for millions.
+- **Disk is vocabulary-driven** (~48 KB per distinct word). Very large vocabularies mean
+  multi-GB indexes — RAM stays low (lazy memmaps), but budget the disk.
+- **The engine recalls; it does not read.** It returns the right documents and why — your
+  agent (or you) still reads them.
+
+## Project status
+
+**v0.1 — early.** Extracted from a private codebase where it was built and benchmarked
+against real business corpora (thousands of real documents, ~500 tests, measured research
+notes in `research/`). Day-to-day production usage is just beginning: expect rough edges,
+and expect honest fixes.
+
+## Why not just…
+
+- **…BM25?** Beaten on paraphrase benchmarks by the co-occurrence + embedding channels
+  (BM25 baseline ships in `bench/` — measure it on your own corpus).
+- **…an embeddings API?** Every indexed document is a paid API call, re-paid on every
+  rebuild, and your data leaves the machine. Mosaic rebuilds nightly for free, offline.
+- **…a vector database?** That is infrastructure to run and secure. Mosaic is files on
+  disk and one Python process.
+
+## Scientific background
+
+The mechanisms are standard, measured, and referenced in the code: PPMI + truncated SVD
+(LSA lineage), hyperdimensional computing / MAP-VSA binding (Kanerva; Gayler), reciprocal
+rank fusion (Cormack et al.), conformal prediction for calibrated abstention (Vovk et al.),
+static embeddings via model2vec distillation.
 
 ## Design principles
 
