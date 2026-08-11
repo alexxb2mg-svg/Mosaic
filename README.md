@@ -195,6 +195,13 @@ and expect honest fixes.
   (BM25 baseline ships in `bench/` — measure it on your own corpus).
 - **…an embeddings API?** Every indexed document is a paid API call, re-paid on every
   rebuild, and your data leaves the machine. Mosaic rebuilds nightly for free, offline.
+- **…a static embedding model alone (model2vec)?** Measured on the bundled benchmark:
+  embeddings-only scores **MRR 0.830**, the home-grown channels alone (signature +
+  corpus-learned co-occurrence) score **0.958**, and the calibrated mix 0.958. The
+  corpus-learned channel is not decoration — on in-domain paraphrase it beats the generic
+  embedding, and the mix is never worse. Reproduce it yourself:
+  `mosaic calibrer bench/corpus --requetes bench/verite.jsonl --embeddings <table>` (small
+  benchmark, one corpus — a larger public benchmark is on the roadmap).
 - **…a vector database?** That is infrastructure to run and secure. Mosaic is files on
   disk and one Python process.
 
