@@ -94,6 +94,53 @@ On this corpus the engine reaches **11/12 top-1, 12/12 top-3** with the recommen
 profile — and the calibration demo shows the optimal weights *differ* from the defaults,
 which is the point: every corpus has its own optimum, and measurement finds it.
 
+### A larger benchmark: Alloprof (2,556 docs, 2,316 real queries)
+
+The bundled corpus is small by design. For scale, `bench/alloprof.py` downloads the
+[Alloprof](https://huggingface.co/datasets/lyon-nlp/alloprof) French homework-help dataset
+(the same corpus MTEB uses to evaluate French retrieval — CC BY-NC-SA, fetched on demand
+via the public Hugging Face API, never redistributed with this repo) and converts it to
+the bench format:
+
+```bash
+python bench/alloprof.py
+python bench/run_bench.py bench/alloprof/corpus bench/alloprof/verite.jsonl \
+    --config alloprof --no-path-tokens --weights 0.5,0.3,0.2 \
+    --embeddings <table.msee> --abtt 2
+python bench/baseline_model.py bench/alloprof/corpus bench/alloprof/verite.jsonl
+python bench/fusion_bench.py bench/alloprof/corpus bench/alloprof/verite.jsonl \
+    --weights 0.5,0.3,0.2 --no-path-tokens
+```
+
+Measured results (Windows, plain CPU), defeats included:
+
+| System | Recall@10 | MRR |
+|---|---|---|
+| RRF fusion: Mosaic + BM25 + model2vec | **0.517** | **0.324** |
+| RRF fusion: BM25 + model2vec (the standard hybrid) | 0.498 | 0.311 |
+| BM25 alone | 0.482 | 0.310 |
+| Mosaic, calibrated (see below) | 0.385 | 0.259 |
+| model2vec alone (potion-multilingual-128M) | 0.379 | 0.228 |
+| Mosaic, stock defaults | 0.307 | 0.212 |
+
+What this benchmark taught us — kept here because it is the honest story:
+
+- **This is BM25's home turf.** Student questions reuse the documents' exact vocabulary,
+  and the queries are long and noisy (greetings, pasted exercise text). Mosaic's stock
+  defaults — calibrated on a different corpus — scored 0.307.
+- **The shipped levers close most of the gap.** `--no-path-tokens` (the corpus files are
+  named by UUID; indexing path tokens injects hex noise into every grid) is worth +1.5 pts.
+  Running `mosaic calibrer` on 386 sample queries picked markedly more lexical weights
+  (0.50/0.30/0.20) for +6.3 more pts. Calibrated, Mosaic (0.385) edges out model2vec
+  (0.379) — an engine with no pretraining, tuned by measurement, passing a trained model
+  on terrain that favors neither.
+- **The three-channel fusion wins outright.** RRF over (Mosaic + BM25 + model2vec) beats
+  the standard BM25+model2vec hybrid: Mosaic's errors are decorrelated from both. And the
+  same fusion with *uncalibrated* Mosaic scored 0.475 — below BM25 alone. A fusion is only
+  as good as its worst-configured channel.
+- **Determinism holds at scale.** Two independent builds returned identical metrics to the
+  fourth decimal (0.3848 / 0.2593).
+
 ### Embeddings (optional but recommended)
 
 The third encoding channel uses a static [model2vec](https://github.com/MinishLab/model2vec)
@@ -192,17 +239,19 @@ and expect honest fixes.
 
 ## Why not just…
 
-- **…BM25?** Beaten on paraphrase benchmarks by the co-occurrence + embedding channels
-  (BM25 baseline ships in `bench/` — measure it on your own corpus).
+- **…BM25?** Beaten on paraphrase benchmarks by the co-occurrence + embedding channels —
+  but it wins alone on lexical terrain (see the Alloprof benchmark above), which is why
+  the measured winner is the three-channel fusion, not either system alone (BM25 baseline
+  ships in `bench/` — measure it on your own corpus).
 - **…an embeddings API?** Every indexed document is a paid API call, re-paid on every
   rebuild, and your data leaves the machine. Mosaic rebuilds nightly for free, offline.
-- **…a static embedding model alone (model2vec)?** Measured on the bundled benchmark:
-  embeddings-only scores **MRR 0.830**, the home-grown channels alone (signature +
-  corpus-learned co-occurrence) score **0.958**, and the calibrated mix 0.958. The
-  corpus-learned channel is not decoration — on in-domain paraphrase it beats the generic
-  embedding, and the mix is never worse. Reproduce it yourself:
-  `mosaic calibrer bench/corpus --requetes bench/verite.jsonl --embeddings <table>` (small
-  benchmark, one corpus — a larger public benchmark is on the roadmap).
+- **…a static embedding model alone (model2vec)?** Measured twice. On the bundled
+  paraphrase benchmark: embeddings-only scores **MRR 0.830**, the home-grown channels
+  alone (signature + corpus-learned co-occurrence) score **0.958**. On the 2,556-document
+  Alloprof benchmark above — hostile terrain — calibrated Mosaic still edges model2vec
+  (0.385 vs 0.379 Recall@10), and fusing both with BM25 beats every single system and the
+  standard hybrid. The corpus-learned channel is not decoration. Reproduce it yourself:
+  `mosaic calibrer bench/corpus --requetes bench/verite.jsonl --embeddings <table>`.
 - **…a vector database?** That is infrastructure to run and secure. Mosaic is files on
   disk and one Python process.
 
