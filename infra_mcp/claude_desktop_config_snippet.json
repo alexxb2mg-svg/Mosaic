@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mosaic": {
+      "command": "python",
+      "args": [
+        "/absolute/path/to/mosaic/infra_mcp/mosaic_mcp.py"
+      ],
+      "env": {
+        "MOSAIC_MCP_DATA_DIR": "/absolute/path/to/your/indexes",
+        "MOSAIC_POTION_MODEL_DIR": "/absolute/path/to/mosaic/data_externes/potion_model"
+      }
+    }
+  }
+}

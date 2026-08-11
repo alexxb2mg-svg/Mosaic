@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mosaic-index"
+version = "0.1.0"
+description = "Indexation sémantique par mosaïques hyperdimensionnelles — locale, déterministe, sans LLM"
+requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+dependencies = ["numpy==2.4.6"]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "ruff==0.16.2", "ty==0.0.69", "import-linter==2.13", "pre-commit"]
+ingest = ["markitdown[pdf,docx,xlsx,pptx]==0.1.7"]
+ocr = ["rapidocr==3.9.2", "pypdfium2==5.12.1"]
+rerank = ["model2vec==0.8.2"]
+
+[project.scripts]
+mosaic = "mosaic.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mosaic = ["data/*.json", "data/*.txt"]
+
+[tool.ruff.lint]
+# Jeu de règles EXPLICITE — sans ça, la sélection PAR DÉFAUT de ruff varie selon la
+# version installée et fait diverger le CI du poste local. Cas rencontré : ruff 0.16.2
+# n'active pas E402 par défaut, donc les `# noqa: E402` légitimes des scripts de banc
+# (imports après un sys.path.insert) étaient signalés RUF100 « noqa inutile » en CI alors
+# qu'ils passaient en local. On fige donc les défauts historiques (E4 réactive E402) et on
+# garde RUF100 seul (pas toute la famille RUF, qui piégerait l'accentuation française).
+select = ["E4", "E7", "E9", "F", "RUF100"]
+
+[tool.ty.rules]
+# Les imports optionnels (markitdown, rapidocr, pypdfium2, model2vec) sont sous garde
+# try/except : selon que l'extra est installé ou non, c'est le `# ty: ignore[unresolved-import]`
+# de la ligne d'import OU le `# ty: ignore[invalid-assignment]` du repli `= None` qui est
+# actif — jamais les deux. Rendre "unused-ignore-comment" bloquant condamnerait le motif à
+# n'être vert que dans un seul des deux environnements. On le rétrograde donc en silencieux.
+unused-ignore-comment = "ignore"

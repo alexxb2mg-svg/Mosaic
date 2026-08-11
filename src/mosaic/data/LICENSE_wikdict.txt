@@ -1,0 +1,26 @@
+Lexique WikDict filtré (lexicon_wikdict_fr_en.json)
+=====================================================
+
+Source     : WikDict eng-fra
+URL exacte : https://download.wikdict.com/dictionaries/sqlite/2/en-fr.sqlite3
+             ("2" est le lien symbolique vers la version la plus récente au
+             moment du téléchargement, résolue en 2_2026-06 ; fichier daté
+             23-Jun-2026 par le serveur, publié par download.wikdict.com)
+Téléchargé le : 2026-08-09
+Licence source : CC BY-SA (Creative Commons Attribution-ShareAlike)
+                 https://creativecommons.org/licenses/by-sa/4.0/
+                 WikDict agrège des données issues des Wiktionary de
+                 plusieurs langues, eux-mêmes sous CC BY-SA.
+
+Ce fichier (lexicon_wikdict_fr_en.json) est une DÉRIVATION FILTRÉE de la
+base WikDict eng-fra ci-dessus : voir scripts/import_wikdict.py pour la
+méthode exacte (filtres appliqués, seuil de confiance, code source complet).
+En tant que dérivation d'une œuvre CC BY-SA, ce fichier de données est
+distribué sous les mêmes termes CC BY-SA — il est SÉPARÉ du code du projet
+Mosaic (licence MIT, voir la racine du dépôt) et ne doit jamais être
+confondu avec lui. Toute réutilisation de lexicon_wikdict_fr_en.json en
+dehors de ce projet doit conserver cette attribution et rester sous
+CC BY-SA.
+
+Ce fichier ne contient aucune donnée personnelle ; il s'agit de paires
+mot anglais → traduction française sélectionnées automatiquement.

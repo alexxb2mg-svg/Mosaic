@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+
+# local artifacts (embedding tables, downloaded models, built indexes)
+data_externes/
+index_*/
+
+# local ty config (machine-specific; see ci.yml for the CI setup)
+ty.toml

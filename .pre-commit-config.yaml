@@ -1,0 +1,29 @@
+# Hooks pré-commit et pré-push Mosaic — activation : pip install pre-commit && pre-commit install --hook-type pre-commit --hook-type pre-push
+# (geste laissé à Alex, comme la tâche planifiée et le MCP)
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.2          # ALIGNÉ sur le CI (pyproject dev + ci.yml) — sinon dérive de règles
+    hooks:
+      - id: ruff          # lint (avec --fix)
+        args: [--fix]
+      - id: ruff-format   # format
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1          # version vérifiée existante (v8.23.3 devinée = inexistante)
+    hooks:
+      - id: gitleaks      # scan de secrets (données sensibles dans le code)
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: architecture (import-linter)
+        # invocation par module : l'exécutable `lint-imports` n'est pas garanti sur le PATH
+        # des hooks git ; `python -c` utilise le python du projet (import-linter + mosaic -e).
+        entry: python -c "from importlinter.cli import lint_imports; lint_imports()"
+        language: system
+        pass_filenames: false
+        stages: [pre-push]   # au push : vérifie les contrats d'architecture
+      - id: ty
+        name: types (ty)
+        entry: ty check src
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

@@ -1,0 +1,46 @@
+[importlinter]
+root_package = mosaic
+
+[importlinter:contract:orchestration-non-remontante]
+name = Les briques de base ne dépendent jamais de l'orchestrateur (anti-couplage)
+type = forbidden
+source_modules =
+    mosaic.signatures
+    mosaic.tokenize
+    mosaic.render
+    mosaic.smoothing
+    mosaic.profiles
+    mosaic.encoder
+    mosaic.embeddings
+    mosaic.collocations
+    mosaic.lexicon
+    mosaic.relations
+    mosaic.rerank
+    mosaic.store
+    mosaic.docio
+    mosaic.ingest
+    mosaic.temporel
+    mosaic.facettes
+    mosaic.meta
+forbidden_modules =
+    mosaic.index
+    mosaic.queries
+    mosaic.cli
+    mosaic.carte
+# Arêtes purement TYPE_CHECKING (annotations, aucune dépendance runtime — vérifié) :
+ignore_imports =
+    mosaic.render -> mosaic.index
+    mosaic.encoder -> mosaic.profiles
+
+[importlinter:contract:fondation-pure]
+name = La fondation (signatures, tokenize) n'importe aucun autre module Mosaic
+type = forbidden
+source_modules =
+    mosaic.signatures
+    mosaic.tokenize
+forbidden_modules =
+    mosaic.profiles
+    mosaic.encoder
+    mosaic.embeddings
+    mosaic.store
+    mosaic.relations

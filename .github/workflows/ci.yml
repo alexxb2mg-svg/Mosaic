@@ -1,0 +1,66 @@
+name: CI Mosaic
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ── Job 1 : porte rapide, sans réseau ni extras. Feu vert/rouge en ~2 min.
+  coeur:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # gitleaks a besoin de l'historique complet
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Dépendances (cœur + outils, sans les extras lourds)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install "pytest==9.1.1" "ruff==0.16.2" "ty==0.0.69" "import-linter==2.13"
+      - name: Format (ruff)
+        run: ruff format --check src tests bench scripts infra_mcp
+      - name: Lint (ruff)
+        run: ruff check src tests bench scripts infra_mcp
+      - name: Types (ty)
+        run: ty check src
+      - name: Architecture (import-linter)
+        run: lint-imports
+      - name: Secrets (gitleaks, binaire — gratuit en privé)
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks detect --source . --no-banner --redact
+      - name: Tests du cœur (les tests des extras se sautent via importorskip)
+        run: python -m pytest -q
+
+  # ── Job 2 : suite ENTIÈRE avec tous les extras installés — exerce réellement
+  #    l'OCR (rapidocr), le repêcheur (model2vec/potion) et la conversion markitdown.
+  #    Rien du produit n'échappe au CI. Modèles mis en cache pour rester fiable.
+  complet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Cache des modèles téléchargés (HuggingFace, rapidocr)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/rapidocr
+            ~/.cache/modelscope
+          key: modeles-extras-v1
+      - name: Dépendances (cœur + TOUS les extras, versions épinglées)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,ingest,ocr,rerank]"
+      - name: Suite entière (OCR + rerank + markitdown exercés)
+        run: python -m pytest -q
