@@ -196,33 +196,36 @@ class Index:
 
     # -- construction -------------------------------------------------------
 
-    @classmethod
-    def build(
-        cls,
+    # ------------------------------------------------------------------
+    # build : phases nommées (chirurgie 12/08 — l'orchestrateur reste plat,
+    # chaque phase est un pur DÉPLACEMENT de code : mêmes opérations, même
+    # ordre, bit-identité vérifiée par sha256 d'index complets, défauts et
+    # tous canaux). Une phase = testable seule ; le flux de données entre
+    # phases est explicite dans les signatures, plus aucun état partagé.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_valider(
         corpus_dir: Path,
-        index_dir: Path,
-        grid: tuple[int, int, int] = GRID_DEFAULT,
-        lexicon: dict[str, str] | None = None,
-        embeddings: Embeddings | None = None,
-        embeddings_path: Path | None = None,
-        weights: tuple[float, float, float] | None = None,
-        profile_weighting: str = PROFILE_WEIGHTING_DEFAULT,
-        smoothing_rank: int = SMOOTHING_RANK_DEFAULT,
-        abtt: int = 0,
-        ingest_cache_dir: Path | None = None,
-        doc_weight: float = 0.0,
-        rerank_vectors: bool = False,
-        index_paths: bool = True,
-        ocr: bool = False,
-        relations: bool = False,
-        type_doc: bool = False,
-        profil: dict | None = None,
-        hybride: bool = False,
-        grilles_typees: bool = False,
-        atlas: bool = False,
-        grammatical: bool = False,
-    ) -> "Index":
-        corpus_dir, index_dir = Path(corpus_dir), Path(index_dir)
+        atlas: bool,
+        hybride: bool,
+        grilles_typees: bool,
+        rerank_vectors: bool,
+        profil: dict | None,
+        embeddings: Embeddings | None,
+        embeddings_path: Path | None,
+        abtt: int,
+        weights: tuple[float, float, float] | None,
+    ) -> tuple[
+        bool,
+        dict | None,
+        Embeddings | None,
+        Path | None,
+        tuple[float, float, float],
+    ]:
+        """Phase 1 — refus forts et tôt : gardes de composition des canaux,
+        validation du profil, disponibilité model2vec, cohérence embeddings/abtt.
+        Rend (rerank_vectors, profil, embeddings, embed_path, weights) résolus."""
         if not corpus_dir.is_dir():
             raise ValueError(f"corpus introuvable : {corpus_dir}")
         if atlas and not hybride:
@@ -266,7 +269,32 @@ class Index:
                 "la table fournie n'a pas été chargée avec le même paramètre all-but-the-top"
             )
         weights = WEIGHTS_DEFAULT if weights is None else weights
-        dim = grid[0] * grid[1] * grid[2]
+        return rerank_vectors, profil, embeddings, embed_path, weights
+
+    @staticmethod
+    def _build_lire_corpus(
+        corpus_dir: Path,
+        dim_grille: int,
+        profil: dict | None,
+        ingest_cache_dir: Path | None,
+        ocr: bool,
+        grilles_typees: bool,
+        index_paths: bool,
+        type_doc: bool,
+        rerank_vectors: bool,
+        grammatical: bool,
+    ) -> tuple[
+        list[tuple[str, list[str]]],
+        list[list[str]],
+        list[str],
+        list[tuple[np.ndarray, float]],
+        dict[str, dict[str, str]],
+        int,
+    ]:
+        """Phase 2 — la seule passe qui LIT les documents : tokens de contenu,
+        chemins (flux à part si typé), facettes, textes rerank et rôles
+        grammaticaux (sur texte brut, DANS la boucle — le texte n'est pas
+        conservé). Un document illisible est ignoré ET compté, jamais silencieux."""
         files = sorted(
             p
             for p in corpus_dir.rglob("*")
@@ -287,7 +315,6 @@ class Index:
         # boucle de lecture, le texte n'est pas conservé.
         gram_rows: list[tuple[np.ndarray, float]] = []
         ext_gram = grammaire_module.extension_depuis_profil(profil)
-        dim_grille = grid[0] * grid[1] * grid[2]
         facettes: dict[str, dict[str, str]] = {}
         ignores = 0
         for p in files:
@@ -321,38 +348,58 @@ class Index:
                 gram_rows.append(
                     grammaire_module.canal_document(text, dim_grille, ext_gram)
                 )
-        if lexicon is None:
-            lexicon = load_lexicon()
-        compiled = compile_lexicon(lexicon)
-        canon = [(doc_id, canonicalize(tokens, compiled)) for doc_id, tokens in raw]
-        colloc = detect([t for _, t in canon])
-        docs = [
-            (doc_id, merge(merge(tokens, colloc), colloc)) for doc_id, tokens in canon
-        ]
-        config_grilles: dict[str, dict] = {}
-        flux_par_doc: list[dict[str, list[str]]] = []
-        if grilles_typees:
-            # Routage (spec v4) : chaque document est réparti entre les grilles — le
-            # flux « sens » DEVIENT le contenu de la grille principale, dimensionnée
-            # au vocabulaire réel ; les autres grilles sont construites plus bas.
-            config_grilles = typage_module.config_grilles(profil)
-            regles_refs = (profil or {}).get("refs")
-            chemins_canon = [canonicalize(c, compiled) for c in chemins_bruts]
-            flux_par_doc = [
-                typage_module.router_flux(
-                    tokens, chemins_canon[i], config_grilles, regles_refs
-                )
-                for i, (_doc_id, tokens) in enumerate(docs)
-            ]
-            docs = [
-                (doc_id, flux["sens"])
-                for (doc_id, _t), flux in zip(docs, flux_par_doc, strict=True)
-            ]
-            vocab_sens = len({t for f in flux_par_doc for t in f["sens"]})
-            dim = typage_module.dim_effective(
-                int(config_grilles["sens"]["dim"]), vocab_sens
+        return raw, chemins_bruts, rerank_texts, gram_rows, facettes, ignores
+
+    @staticmethod
+    def _build_router_typee(
+        docs: list[tuple[str, list[str]]],
+        chemins_bruts: list[list[str]],
+        compiled,
+        profil: dict | None,
+        dim: int,
+        grid: tuple[int, int, int],
+    ) -> tuple[
+        list[tuple[str, list[str]]],
+        list[dict[str, list[str]]],
+        dict[str, dict],
+        int,
+        tuple[int, int, int],
+    ]:
+        """Phase 4 (opt-in v4) — routage à l'écriture : chaque document est réparti
+        entre les grilles, le flux « sens » devient la grille principale,
+        dimensionnée au vocabulaire réel."""
+        config_grilles = typage_module.config_grilles(profil)
+        regles_refs = (profil or {}).get("refs")
+        chemins_canon = [canonicalize(c, compiled) for c in chemins_bruts]
+        flux_par_doc = [
+            typage_module.router_flux(
+                tokens, chemins_canon[i], config_grilles, regles_refs
             )
-            grid = typage_module.grille_de_dim(dim)
+            for i, (_doc_id, tokens) in enumerate(docs)
+        ]
+        docs = [
+            (doc_id, flux["sens"])
+            for (doc_id, _t), flux in zip(docs, flux_par_doc, strict=True)
+        ]
+        vocab_sens = len({t for f in flux_par_doc for t in f["sens"]})
+        dim = typage_module.dim_effective(
+            int(config_grilles["sens"]["dim"]), vocab_sens
+        )
+        grid = typage_module.grille_de_dim(dim)
+        return docs, flux_par_doc, config_grilles, dim, grid
+
+    @staticmethod
+    def _build_encoder_grille(
+        docs: list[tuple[str, list[str]]],
+        dim: int,
+        profile_weighting: str,
+        smoothing_rank: int,
+        embeddings: Embeddings | None,
+        weights: tuple[float, float, float],
+        doc_weight: float,
+    ) -> tuple[Profiles, np.ndarray, np.ndarray, list[str]]:
+        """Phase 5 — le cœur : apprentissage des profils de cooccurrence
+        (learn/finalize/lissage) puis encodage int8 de chaque document."""
         profiles = Profiles(dim)
         for _, tokens in docs:
             profiles.learn(tokens)
@@ -371,6 +418,184 @@ class Index:
             )
             mat[row], norms[row] = q, n
             ids.append(doc_id)
+        return profiles, mat, norms, ids
+
+    @staticmethod
+    def _build_canal_bm25(
+        docs: list[tuple[str, list[str]]],
+        flux_par_doc: list[dict[str, list[str]]],
+        hybride: bool,
+        grilles_typees: bool,
+    ) -> Bm25 | None:
+        """Phase 6a — postings BM25 sur le MÊME flux de tokens que la grille
+        (canonical + collocations) : les deux canaux de la fusion voient le même
+        monde. Index typé : le flux complet est la réunion des flux par grille."""
+        if hybride and grilles_typees:
+            return Bm25.from_docs(
+                [
+                    (doc_id, [t for typ in sorted(flux) for t in flux[typ]])
+                    for (doc_id, _s), flux in zip(docs, flux_par_doc, strict=True)
+                ]
+            )
+        return Bm25.from_docs(docs) if hybride else None
+
+    @staticmethod
+    def _build_canal_grammatical(
+        gram_rows: list[tuple[np.ndarray, float]], dim_grille: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Phase 6b — empile les rôles analysés en phase 2 (int8 + normes)."""
+        gram_mat = (
+            np.stack([v for v, _n in gram_rows]).astype(np.int8)
+            if gram_rows
+            else np.zeros((0, dim_grille), dtype=np.int8)
+        )
+        gram_norms = np.array([n for _v, n in gram_rows], dtype=np.float32)
+        return gram_mat, gram_norms
+
+    @staticmethod
+    def _build_canal_atlas(
+        docs: list[tuple[str, list[str]]], profiles: Profiles
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Phase 6c (#367) — SOM déterministe sur les profils du vocabulaire ->
+        cellule par token, puis carte de chaleur tf×idf par document (même flux
+        de tokens que la grille et BM25), quantifiée int8 comme les grilles."""
+        atlas_positions = atlas_module.construire_mapping(profiles)
+        atlas_mat = np.zeros(
+            (len(docs), atlas_module.COTE * atlas_module.COTE), dtype=np.int8
+        )
+        atlas_norms = np.zeros(len(docs), dtype=np.float32)
+        for row, (_doc_id, toks) in enumerate(docs):
+            m = atlas_module.carte(toks, profiles.rows, atlas_positions, profiles.idf)
+            atlas_mat[row], atlas_norms[row] = quantize(m)
+        return atlas_positions, atlas_mat, atlas_norms
+
+    @staticmethod
+    def _build_grilles_extra(
+        config_grilles: dict[str, dict],
+        flux_par_doc: list[dict[str, list[str]]],
+        profile_weighting: str,
+        embeddings: Embeddings | None,
+        weights: tuple[float, float, float],
+    ) -> dict[str, "GrilleTypee"]:
+        """Phase 6d (v4) — grilles typées EXTRA (ref/chemin/custom), la grille sens
+        étant déjà la principale. Chaque grille : sa dimension (taillée au vocab),
+        ses poids, son lissage (JAMAIS sur des identifiants), ses embeddings."""
+        grilles: dict[str, GrilleTypee] = {}
+        for t, cfg in config_grilles.items():
+            if t == "sens":
+                continue
+            flux_t = [f[t] for f in flux_par_doc]
+            vocab_t = len({tok for toks in flux_t for tok in toks})
+            dim_t = typage_module.dim_effective(
+                int(cfg["dim"]), vocab_t, cfg.get("poids")
+            )
+            prof_t = Profiles(dim_t)
+            for toks in flux_t:
+                prof_t.learn(toks)
+            # finalize INCONDITIONNEL : rows peut être vide alors que la grille
+            # sert (une réf SEULE par document ne forme aucune paire de
+            # cooccurrence — la signature porte tout le signal ; état normal).
+            prof_t.finalize(profile_weighting)
+            if prof_t.rows:
+                _apply_smoothing(prof_t, int(cfg.get("lissage") or 0))
+            mat_t = np.zeros((len(flux_t), dim_t), dtype=np.int8)
+            norms_t = np.zeros(len(flux_t), dtype=np.float32)
+            emb_t = embeddings if cfg.get("embeddings") else None
+            poids_t = tuple(cfg["poids"]) if cfg.get("poids") else weights
+            for row, toks in enumerate(flux_t):
+                q_t, n_t = encode(toks, prof_t, embeddings=emb_t, weights=poids_t)
+                mat_t[row], norms_t[row] = q_t, n_t
+            grilles[t] = GrilleTypee(prof_t, mat_t, norms_t, dict(cfg))
+        return grilles
+
+    @classmethod
+    def build(
+        cls,
+        corpus_dir: Path,
+        index_dir: Path,
+        grid: tuple[int, int, int] = GRID_DEFAULT,
+        lexicon: dict[str, str] | None = None,
+        embeddings: Embeddings | None = None,
+        embeddings_path: Path | None = None,
+        weights: tuple[float, float, float] | None = None,
+        profile_weighting: str = PROFILE_WEIGHTING_DEFAULT,
+        smoothing_rank: int = SMOOTHING_RANK_DEFAULT,
+        abtt: int = 0,
+        ingest_cache_dir: Path | None = None,
+        doc_weight: float = 0.0,
+        rerank_vectors: bool = False,
+        index_paths: bool = True,
+        ocr: bool = False,
+        relations: bool = False,
+        type_doc: bool = False,
+        profil: dict | None = None,
+        hybride: bool = False,
+        grilles_typees: bool = False,
+        atlas: bool = False,
+        grammatical: bool = False,
+    ) -> "Index":
+        """Construit un index — orchestrateur PLAT, une ligne par phase :
+
+        1. valider (refus forts et tôt)         _build_valider
+        2. lire le corpus (seule passe I/O)     _build_lire_corpus
+        3. canonicaliser + collocations         (inline : trois lignes)
+        4. router vers les grilles typées       _build_router_typee (opt-in)
+        5. apprendre + encoder la grille        _build_encoder_grille
+        6. canaux annexes                       _build_canal_* / _build_grilles_extra
+        7. assembler + persister                cls(...) + _save()
+        """
+        corpus_dir, index_dir = Path(corpus_dir), Path(index_dir)
+        rerank_vectors, profil, embeddings, embed_path, weights = cls._build_valider(
+            corpus_dir,
+            atlas,
+            hybride,
+            grilles_typees,
+            rerank_vectors,
+            profil,
+            embeddings,
+            embeddings_path,
+            abtt,
+            weights,
+        )
+        dim = grid[0] * grid[1] * grid[2]
+        dim_grille = dim  # le canal grammatical reste sur la géométrie d'origine
+        raw, chemins_bruts, rerank_texts, gram_rows, facettes, ignores = (
+            cls._build_lire_corpus(
+                corpus_dir,
+                dim_grille,
+                profil,
+                ingest_cache_dir,
+                ocr,
+                grilles_typees,
+                index_paths,
+                type_doc,
+                rerank_vectors,
+                grammatical,
+            )
+        )
+        if lexicon is None:
+            lexicon = load_lexicon()
+        compiled = compile_lexicon(lexicon)
+        canon = [(doc_id, canonicalize(tokens, compiled)) for doc_id, tokens in raw]
+        colloc = detect([t for _, t in canon])
+        docs = [
+            (doc_id, merge(merge(tokens, colloc), colloc)) for doc_id, tokens in canon
+        ]
+        config_grilles: dict[str, dict] = {}
+        flux_par_doc: list[dict[str, list[str]]] = []
+        if grilles_typees:
+            docs, flux_par_doc, config_grilles, dim, grid = cls._build_router_typee(
+                docs, chemins_bruts, compiled, profil, dim, grid
+            )
+        profiles, mat, norms, ids = cls._build_encoder_grille(
+            docs,
+            dim,
+            profile_weighting,
+            smoothing_rank,
+            embeddings,
+            weights,
+            doc_weight,
+        )
         rerank_vecs = None
         rerank_model = None
         if rerank_vectors:
@@ -381,72 +606,20 @@ class Index:
             # Le nom du modèle RÉELLEMENT chargé (MOSAIC_POTION_MODEL_DIR compris) —
             # la constante mentait quand l'env pointait un autre modèle (bug 12/08).
             rerank_model = rerank_module.model_name_effectif()
-        # Postings BM25 sur le MÊME flux de tokens que la grille (canonical + collocations,
-        # chemins selon index_paths) : les deux canaux de la fusion voient le même monde.
-        # Index typé : le flux complet est la réunion des flux par grille (le monde entier).
-        if hybride and grilles_typees:
-            bm25 = Bm25.from_docs(
-                [
-                    (doc_id, [t for typ in sorted(flux) for t in flux[typ]])
-                    for (doc_id, _s), flux in zip(docs, flux_par_doc, strict=True)
-                ]
-            )
-        else:
-            bm25 = Bm25.from_docs(docs) if hybride else None
-        # Canal atlas (#367) : SOM déterministe sur les profils du vocabulaire ->
-        # cellule par token, puis carte de chaleur tf×idf par document (même flux de
-        # tokens que la grille et BM25), quantifiée int8 comme les grilles.
+        bm25 = cls._build_canal_bm25(docs, flux_par_doc, hybride, grilles_typees)
         gram_mat = gram_norms = None
         if grammatical:
-            gram_mat = (
-                np.stack([v for v, _n in gram_rows]).astype(np.int8)
-                if gram_rows
-                else np.zeros((0, dim_grille), dtype=np.int8)
-            )
-            gram_norms = np.array([n for _v, n in gram_rows], dtype=np.float32)
+            gram_mat, gram_norms = cls._build_canal_grammatical(gram_rows, dim_grille)
         atlas_positions = atlas_mat = atlas_norms = None
         if atlas:
-            atlas_positions = atlas_module.construire_mapping(profiles)
-            atlas_mat = np.zeros(
-                (len(docs), atlas_module.COTE * atlas_module.COTE), dtype=np.int8
+            atlas_positions, atlas_mat, atlas_norms = cls._build_canal_atlas(
+                docs, profiles
             )
-            atlas_norms = np.zeros(len(docs), dtype=np.float32)
-            for row, (_doc_id, toks) in enumerate(docs):
-                m = atlas_module.carte(
-                    toks, profiles.rows, atlas_positions, profiles.idf
-                )
-                atlas_mat[row], atlas_norms[row] = quantize(m)
-        # Grilles typées EXTRA (ref/chemin/custom) — la grille sens est déjà la
-        # principale. Chaque grille : sa dimension (taillée au vocab), ses poids, son
-        # lissage (JAMAIS sur des identifiants), ses embeddings (spec v4 §1-4).
         grilles: dict[str, GrilleTypee] | None = None
         if grilles_typees:
-            grilles = {}
-            for t, cfg in config_grilles.items():
-                if t == "sens":
-                    continue
-                flux_t = [f[t] for f in flux_par_doc]
-                vocab_t = len({tok for toks in flux_t for tok in toks})
-                dim_t = typage_module.dim_effective(
-                    int(cfg["dim"]), vocab_t, cfg.get("poids")
-                )
-                prof_t = Profiles(dim_t)
-                for toks in flux_t:
-                    prof_t.learn(toks)
-                # finalize INCONDITIONNEL : rows peut être vide alors que la grille
-                # sert (une réf SEULE par document ne forme aucune paire de
-                # cooccurrence — la signature porte tout le signal ; état normal).
-                prof_t.finalize(profile_weighting)
-                if prof_t.rows:
-                    _apply_smoothing(prof_t, int(cfg.get("lissage") or 0))
-                mat_t = np.zeros((len(flux_t), dim_t), dtype=np.int8)
-                norms_t = np.zeros(len(flux_t), dtype=np.float32)
-                emb_t = embeddings if cfg.get("embeddings") else None
-                poids_t = tuple(cfg["poids"]) if cfg.get("poids") else weights
-                for row, toks in enumerate(flux_t):
-                    q_t, n_t = encode(toks, prof_t, embeddings=emb_t, weights=poids_t)
-                    mat_t[row], norms_t[row] = q_t, n_t
-                grilles[t] = GrilleTypee(prof_t, mat_t, norms_t, dict(cfg))
+            grilles = cls._build_grilles_extra(
+                config_grilles, flux_par_doc, profile_weighting, embeddings, weights
+            )
         index_dir.mkdir(parents=True, exist_ok=True)
         idx = cls(
             index_dir,
