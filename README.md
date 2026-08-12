@@ -183,7 +183,12 @@ every grid still renders as a mosaic. The grid superposes a deterministic SHA-se
 against int8-quantized vectors — one reading per grid on a typed index, synthesized by
 the query's idf mass.
 
-<p align="center"><img src="docs/grid_example.png" width="256" alt="A document, as Mosaic sees it: a color grid"><br><em>A real document from the bundled benchmark, as the engine sees it.</em></p>
+<p align="center"><img src="docs/grid_example.png" width="256" alt="The same document as a standard hash grid: uniform confetti, the layout is arbitrary"> <img src="docs/atlas_example.png" width="256" alt="The same document as an atlas heatmap: a few semantic neighborhoods light up"><br><em>The same real document (a recipe from the bundled bench), two ways. Left: the standard
+grid — the founding metaphor, and an honest confession: a permutation test proved this
+layout is inert (shuffle every cell, not one score moves). Right: the learned atlas
+(<code>--atlas</code>) — neighboring cells now hold related concepts, the document lives in a
+few semantic neighborhoods, and the picture finally means what it shows. The metaphor
+had to earn its truth, and the measures of that journey ship in <code>research/</code>.</em></p>
 
 Around that core, the other tiles: **BM25 postings** over the same token stream
 (`--hybride`); a **semantic atlas** (`--atlas`) — a SOM learned from the co-occurrence
