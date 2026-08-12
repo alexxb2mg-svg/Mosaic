@@ -179,6 +179,17 @@ therefore invalidate every existing index — an explicit decision, not a cleanu
 - Replay: `python research/ram_build.py <corpus> <index_out>` (Windows peak
   working set; the same script runs on both code generations for an honest A/B).
 
+Follow-up, same corpus (`research/profil_build.py` — wall time per component,
+answering "what would a compiled language buy?"): true BLAS is only **13 %** of
+the build (the SVD, 15.6 s of 119 s). The single dominant component is
+`finalize`'s pure-Python pair iteration (**49.1 s, 41 %**), and the "numpy"
+encode phase (40.3 s, 34 %) is bound by many-small-ops dispatch overhead, not
+by arithmetic. Amdahl's ceiling for a native kernel (or a sparse restructure —
+signatures carry 40 non-zeros out of 12,288, but PPMI weights are logs, so any
+reordering changes bits = a declared version change): build ≈ 25–35 s, ×3.5–4.5.
+The hypothesis "the co-occurrence window loop dominates" was falsified: after
+the array refactor, `learn` costs 3.5 s.
+
 ## The sharding bench (can capped indexes beat one big index?)
 
 The scale question, put to the judge (`research/shards_fusion.py`): split
