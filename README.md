@@ -1,172 +1,83 @@
 # Mosaic
 
-**A sovereign semantic engine: search and remember by *meaning* — on a plain CPU, deterministically, with no LLM in the loop.**
+**A sovereign semantic search engine — a mosaic of retrieval methods, assembled and
+calibrated by measurement on *your* corpus. Local, deterministic, no LLM in the loop.**
 
-No cloud, no GPU, no per-query bill, no data ever leaving your machine. On a given
-machine, the same corpus always produces the same index, bit for bit; across machines,
-the int8-quantized search matrix is provably identical (BLAS float variance is absorbed
-by quantization — measured, see below), while float artifacts may differ in inert
-decimals. Every document becomes a small **color grid** — a mosaic — and searching means
-comparing grids: two texts about the same thing get two grids that are geometrically
-close. The geometry is not fixed dogma: 64×64×3 by default, and with typed grids each
-kind of data (meaning, identifiers, paths) gets its own grid, sized to its own
-vocabulary.
+The name is the architecture. Mosaic is not one clever algorithm: it is several
+complementary retrieval processes — a semantic grid learned from your corpus, exact
+lexical postings, static embeddings, a learned semantic atlas — each one measured,
+kept only where it wins, and fused only where fusion wins. No cloud, no GPU, no
+per-query bill, no data ever leaving your machine. The same corpus produces the same
+index and the same ranking, on any machine.
 
-<p align="center"><img src="docs/grid_example.png" width="256" alt="A document, as Mosaic sees it: a color grid"><br><em>A real document from the bundled benchmark, as the engine sees it.</em></p>
+It is built **agent-first** — compact JSON everywhere, an MCP server, usage guidance
+embedded in tool descriptions: your agent sees five lines of JSON instead of thousands
+of tokens of raw files — and **human-usable**: a plain CLI, explanations on demand
+(`explain`, `--explique`), nothing you cannot run and read yourself.
 
 ## The idea
 
-The engine does everything **mechanical**: index, retrieve, remember, and *measure its own
-confidence* — deterministic, free, reproducible. An LLM (if you use one at all) only enters
-at the **point of judgment**: never in the storage or search loop, only when something must
-be *decided* — settling an ambiguity the engine itself has flagged. The deterministic part
-carries the weight; intelligence only pays for the irreducible.
+The engine does everything **mechanical**: index, retrieve, remember, and *measure its
+own confidence* — deterministic, free, reproducible. An LLM (if you use one at all)
+only enters at the **point of judgment**: never in the storage or search loop, only
+when something must be *decided* — settling an ambiguity the engine itself has
+flagged. The deterministic part carries the weight; intelligence only pays for the
+irreducible.
 
-A practical consequence for agent builders: your agent sees **five lines of JSON instead of
-thousands of tokens of raw files**. The engine is a token-saving machine by construction.
+And because no single retrieval method wins everywhere (we measured — see
+[the campaign log](docs/MEASURES.md)), the engine does not pretend one does: you pick
+the tiles of the mosaic per corpus, guided by measured evidence, and `mosaic calibrer`
+tunes the weights on *your* ground truth.
 
 ## What it does
 
-- **Semantic search** (`mosaic search`) — paraphrase-friendly retrieval over any folder of
-  documents (`.md`, `.txt`, `.pdf`, `.docx`, `.xlsx`, `.html`, `.pptx`, images via optional
-  OCR). Query algebra built in: *"A sans B"* pushes concept B **down** the ranking.
-- **Multi-channel identity card** — beyond meaning, each document carries exact **facets**:
-  its *type* (spreadsheet, scanned pdf, photo…), its *date*, its *reference codes*. A code
-  in your query triggers an **automatic exact-match boost**; `--recence` blends semantic
-  rank with freshness; `--type` filters exactly.
-- **Temporal truth** (`mosaic actuel`) — on an evolving folder, versions of the same aspect
-  are grouped; the newest is **canonical**, older ones are flagged **stale**. An agent can
-  no longer mistake outdated data for truth.
-- **Typed grids** (`--grilles-typees`) — route each kind of data to its own grid (meaning /
-  identifiers / paths / your custom types) and synthesize at read time. Identifier lookup
-  stops drowning in prose (+7.5 pts on drowned references) and the meaning grid shrinks
-  4×; plain-prose designations pay a small toll (measured below) — opt-in per corpus.
-- **Cross-index meta-search** (`mosaic meta`) — query several indexes at once, fused by
-  rank (RRF), each result keeping its provenance.
-- **Graph traversal without a graph database** (`mosaic chemin`) — documents are linked to
-  entities extracted from the folder tree (configurable roles); two vector-space hops
-  answer *"the other documents of the same project / the same year"*.
-- **Belief memory** (`mosaic croyance`) — agents assert facts (`entity, attribute, value`);
-  the most recent fact wins, history is kept, and a VSA hypervector layer provides a
-  **confidence margin**. When two values compete, the memory *says so* instead of guessing —
-  and the threshold for "contested" can be **conformally calibrated on your own store**
-  (`croyance calibrer --alpha 0.05`: after calibration, the error rate of confident answers
-  is guaranteed ≤ α).
-- **Declarative per-index profile** (`mosaic profil`) — adapt the engine to *your* world in
-  ten lines of JSON: folder-tree roles (client/case, project/version…), custom document
-  types (`.dwg` → plan), your trade's reference-code shape. `--suggere` scans a corpus and
-  proposes a profile; `--explique` explains any profile in plain language (`--langue en`).
-- **Measured calibration** (`mosaic calibrer`) — encoding weights are never hand-tuned:
-  provide ground-truth queries (or generate them deterministically with `--verite-auto`,
-  no LLM needed) and the benchmark picks the weights, recommending a change **only if the
-  gain is clear**.
-- **MCP server** (`infra_mcp/`) — all of the above exposed to agent frameworks as 10 MCP
-  tools, with usage guidance embedded in the tool descriptions and dynamic domain
-  discovery. Zero dependencies beyond the engine itself.
+- **Semantic search** (`mosaic search`) — paraphrase-friendly retrieval over any
+  folder (`.md`, `.txt`, `.pdf`, `.docx`, `.xlsx`, `.html`, `.pptx`, images via
+  optional OCR). Query algebra opt-in (`--connecteurs`): *"A sans B"* pushes concept B
+  down the ranking.
+- **Typed grids** (`--grilles-typees`) — route meaning words, identifiers and path
+  tokens to separate grids; identifier lookup stops drowning in prose (+7.5 pts on
+  drowned references, measured on real product records).
+- **Four-channel fusion** (`--hybride` + `--fusion`, `--atlas`) — grid + BM25 +
+  embeddings + semantic atlas, fused by rank (RRF). Wins on lexical terrain; refused
+  in degraded subsets, never a silent default.
+- **Multi-channel identity card** — exact facets per document (*type*, *date*,
+  *reference codes*): a code in your query triggers an exact-match boost; `--recence`
+  blends rank with freshness; `--type` filters exactly.
+- **Temporal truth** (`mosaic actuel`) — versions of the same aspect are grouped, the
+  newest is canonical, older ones are flagged **stale**: an agent can no longer
+  mistake outdated data for truth.
+- **Cross-index meta-search** (`mosaic meta`) — several indexes at once, rank-fused,
+  provenance kept.
+- **Graph traversal without a graph database** (`mosaic chemin`) — two vector-space
+  hops answer *"the other documents of the same project / the same year"*.
+- **Belief memory** (`mosaic croyance`) — agents assert facts; the newest wins,
+  history is kept, a hypervector layer provides a confidence margin, and the
+  "contested" threshold can be conformally calibrated on your own store (error rate of
+  confident answers guaranteed ≤ α).
+- **Declarative per-index profile** (`mosaic profil`) — your world in ten lines of
+  JSON: folder-tree roles, custom document types, your trade's reference-code shape.
+  `--suggere` proposes one from a corpus scan.
+- **Measured calibration** (`mosaic calibrer`) — encoding weights picked by benchmark
+  on ground-truth queries (or deterministically generated ones, `--verite-auto`),
+  recommending a change only when the gain is clear.
+- **MCP server** (`infra_mcp/`) — all of the above as 10 MCP tools, dynamic domain
+  discovery, zero dependencies beyond the engine.
 
-## Quickstart
-
-```bash
-pip install -e ".[dev,ingest]"        # core + document conversion
-# optional extras: .[ocr] (scanned documents), .[rerank] (model2vec reranker)
-
-mosaic build ./my_documents -o ./index_docs
-mosaic search "how do I wire the differential breaker" ./index_docs --top 5
-mosaic explain <doc_id> ./index_docs --query "..."   # why did it match?
-```
-
-Everything is JSON on stdout — built for agents first, humans second. Real output from
-the bundled benchmark (paraphrased queries, no keyword overlap with the documents):
-
-```bash
-$ mosaic search "melanger de l'huile et un jaune pour une sauce onctueuse" ./index_bench --rerank
-[{"id": "04_mayonnaise.md", "score": 0.4988, "score_rerank": 0.5507}, ...]
-
-$ mosaic search "mon chocolat fondu redevient terne avec des marbrures" ./index_bench --rerank
-[{"id": "31_chocolat_temperage.md", "score": 0.3000, "score_rerank": 0.3624}, ...]
-```
-
-**Requirements:** Python ≥ 3.12, any OS (CI runs Linux; developed on Windows). No GPU, no
-network access at runtime. Core dependency: numpy only.
-
-### Try the bundled benchmark
-
-A small self-contained corpus (40 French cooking articles + 12 paraphrased ground-truth
-queries) lives in `bench/`:
-
-```bash
-mosaic build bench/corpus -o ./index_bench
-mosaic calibrer bench/corpus --requetes bench/verite.jsonl --explique
-```
-
-On this corpus the engine reaches **11/12 top-1, 12/12 top-3** with the recommended
-profile (**12/12 top-1** with `--grilles-typees` — the last paraphrase trap falls once
-path noise is quarantined in its own grid) — and the calibration demo shows the optimal
-weights *differ* from the defaults, which is the point: every corpus has its own optimum,
-and measurement finds it.
-
-### A larger benchmark: Alloprof (2,556 docs, 2,316 real queries)
-
-The bundled corpus is small by design. For scale, `bench/alloprof.py` downloads the
-[Alloprof](https://huggingface.co/datasets/lyon-nlp/alloprof) French homework-help dataset
-(the same corpus MTEB uses to evaluate French retrieval — CC BY-NC-SA, fetched on demand
-via the public Hugging Face API, never redistributed with this repo) and converts it to
-the bench format:
-
-```bash
-python bench/alloprof.py
-python bench/run_bench.py bench/alloprof/corpus bench/alloprof/verite.jsonl \
-    --config alloprof --no-path-tokens --weights 0.5,0.3,0.2 \
-    --embeddings <table.msee> --abtt 2
-python bench/baseline_model.py bench/alloprof/corpus bench/alloprof/verite.jsonl
-python bench/fusion_bench.py bench/alloprof/corpus bench/alloprof/verite.jsonl \
-    --weights 0.5,0.3,0.2 --no-path-tokens
-```
-
-Measured results (Windows, plain CPU), defeats included:
-
-| System | Recall@10 | MRR |
-|---|---|---|
-| RRF fusion: Mosaic + BM25 + model2vec | **0.517** | **0.324** |
-| RRF fusion: BM25 + model2vec (the standard hybrid) | 0.498 | 0.311 |
-| BM25 alone | 0.482 | 0.310 |
-| Mosaic, calibrated (see below) | 0.385 | 0.259 |
-| model2vec alone (potion-multilingual-128M) | 0.379 | 0.228 |
-| Mosaic, stock defaults | 0.307 | 0.212 |
-
-What this benchmark taught us — kept here because it is the honest story:
-
-- **This is BM25's home turf.** Student questions reuse the documents' exact vocabulary,
-  and the queries are long and noisy (greetings, pasted exercise text). Mosaic's stock
-  defaults — calibrated on a different corpus — scored 0.307.
-- **The shipped levers close most of the gap.** `--no-path-tokens` (the corpus files are
-  named by UUID; indexing path tokens injects hex noise into every grid) is worth +1.5 pts.
-  Running `mosaic calibrer` on 386 sample queries picked markedly more lexical weights
-  (0.50/0.30/0.20) for +6.3 more pts. Calibrated, Mosaic (0.385) edges out model2vec
-  (0.379) — an engine with no pretraining, tuned by measurement, passing a trained model
-  on terrain that favors neither.
-- **The three-channel fusion wins outright.** RRF over (Mosaic + BM25 + model2vec) beats
-  the standard BM25+model2vec hybrid: Mosaic's errors are decorrelated from both. And the
-  same fusion with *uncalibrated* Mosaic scored 0.475 — below BM25 alone. A fusion is only
-  as good as its worst-configured channel.
-- **Determinism holds at scale.** Two independent builds returned identical metrics to the
-  fourth decimal (0.3848 / 0.2593).
-
-## Which setup for which terrain (measured)
+## Choose your setup — the measured terrain map
 
 There is no universal winner — every result below was measured both ways, defeats
-included. The same three-channel fusion that wins outright on Alloprof *loses* on a
-paraphrase-heavy private corpus: it gains +2.5 pts of recall but drops 4 pts of MRR and
-divides the semantic-trap MRR by three (0.153 solo vs 0.051 fused). A rank fusion
-averages its channels' opinions; on lexical terrain that averages toward the truth, on
-semantic terrain it dilutes exactly the wins the grid exists for. Pick by terrain — and
-know the bill before you flip a flag:
+included (the full stories live in [docs/MEASURES.md](docs/MEASURES.md)). The same
+fusion that wins outright on lexical terrain *loses* on a paraphrase-heavy corpus,
+where it divides the semantic-trap MRR by three: a rank fusion averages opinions,
+which converges on lexical terrain and dilutes the grid's semantic wins elsewhere.
+Pick by terrain — and know the bill before you flip a flag:
 
 ```mermaid
 flowchart TD
     Q{"What does your corpus look like?"}
     Q -->|"prose, paraphrase-heavy queries"| A["default grid + embeddings + rerank, no fusion"]
-    Q -->|"lexical Q&A: queries reuse the docs' vocabulary"| B["--hybride at build, --fusion at search"]
+    Q -->|"lexical Q&A: queries reuse the docs' vocabulary"| B["--hybride --atlas at build, --fusion at search"]
     Q -->|"dense in identifiers (catalogs, part numbers)"| C["--grilles-typees + --rerank-vectors"]
     Q -->|"code"| U["not measured yet: run the benches, tell us"]
     A --> T{"Folder evolves over time?"}
@@ -181,233 +92,178 @@ flowchart TD
 | Your corpus looks like | Measured best setup | Evidence | What it costs |
 |---|---|---|---|
 | Prose documents, paraphrase-heavy queries (knowledge bases, notes, procedures) | default grid + embeddings + `--rerank` — **no fusion** | private real-corpus bench: solo beats every fusion on MRR-semantic ×3; bundled bench 11/12 top-1 | disk ≈ vocab × 48 KB + 12 KB/doc; serving 18k docs ≈ 370 MB RAM, 27–63 ms warm; build is nightly-batch, its RAM grows with vocabulary (multi-GB beyond ~70k words); one shared 84 MB embedding table |
-| Lexical Q&A — queries reuse the documents' own vocabulary (FAQ, homework, tickets) | three-channel fusion (`--hybride` + `--fusion`) | Alloprof 2,556 docs: 0.517 R@10 vs 0.498 standard hybrid, 0.482 best single | the row above + BM25 postings (a few MB — an explicit word inventory of your docs: the privacy trade-off is yours) + 0.5 KB/doc rerank vectors; three scans per query, still milliseconds |
-| Catalogs and records dense in identifiers (products, part numbers, case files) | `--grilles-typees` (+ `--rerank-vectors`) | product bench: drowned ref 0.90 vs 0.825, bare ref 0.9917 with rerank | often *cheaper* than default: meaning grid up to 4× smaller when the vocabulary allows, identifier grids are tiny (768 dims ≈ 3 KB/word); same serving class |
+| Lexical Q&A — queries reuse the documents' own vocabulary (FAQ, homework, tickets) | four-channel fusion (`--hybride --atlas` + `--fusion`) | full Alloprof through the engine: quartet **0.5461 R@10** vs 0.5035 trio, 29 ms/query | the row above + BM25 postings (a few MB — an explicit word inventory of your docs: the privacy trade-off is yours) + 0.5 KB/doc rerank vectors + 4 KB/doc atlas maps + a build-time SOM (minutes, a few GB RAM at large vocabularies) |
+| Catalogs and records dense in identifiers (products, part numbers, case files) | `--grilles-typees` (+ `--rerank-vectors`) | product bench: drowned ref 0.90 vs 0.825, bare ref 0.9917 with rerank | often *cheaper* than default: meaning grid up to 4× smaller when the vocabulary allows, identifier grids are tiny (768 dims ≈ 3 KB/word) |
 | Folders that evolve over time, where stale versions are a trap | any of the above + `mosaic actuel` | temporal-truth bench (stale version ranked first by flat search, flagged by `actuel`) | free — reads the facets the index already stores |
-| Code repositories | **unknown — not measured yet** | open question; identifier-dense (typed grids are a candidate), but code has structure none of our benches cover | — |
-
-One more channel graduated from research to product: the **semantic atlas**
-(`--atlas`, requires `--hybride`) — a SOM-organized map of your vocabulary, learned
-from the co-occurrence profiles, that joins `--fusion` as a 4th channel. Engine
-acceptance on the full Alloprof corpus: the four-channel fusion reaches **0.5461
-R@10 vs 0.5035 for the trio (+4.3 pts)** at 29 ms/query — the map's errors
-decorrelate from the flat grid's, and the engine even beats the research prototype
-(0.5319) because it builds every channel on the same clean token stream. The bill is
-at build time: a SOM over the whole vocabulary (minutes, a few GB of RAM at large
-vocabularies, chunked) — which is why it is opt-in, never a default. The research
-that earned it ships in `research/` (`atlas_som.py`, `atlas_capacite.py`,
-`atlas_fusion.py`, `valider_atlas_moteur.py`) — including the dead end: the
-pyramid prefilter variant failed its criterion, control included.
+| Code repositories | **unknown — not measured yet** | open question: for symbol lookup, grep/LSP are native and exact — the honest hypothesis to test is intent-to-code on mixed repos | — |
 
 Two rules fall out of this table. First: **measure on your own corpus** — 20–40
 ground-truth queries and the bundled benches (`bench/run_bench.py`,
 `bench/fusion_bench.py`) settle in minutes what no doctrine can. Second: the roadmap
 follows the same logic — `mosaic calibrer` already picks encoding weights from your
-ground truth; teaching it to pick the *architecture* flags (typed? fused? reranked?) the
-same way is the natural next step.
+ground truth; teaching it to pick the *architecture* flags the same way is the natural
+next step.
 
-## The features, each one measured
-
-### Native three-channel fusion (`--hybride` / `--fusion`)
-
-The winning architecture of the Alloprof benchmark is built in — one flag at build time, one at search time:
+## Quickstart
 
 ```bash
-mosaic build ./docs -o ./index --hybride     # BM25 postings + model2vec vectors
-mosaic search "your query" ./index --fusion  # RRF over all three channels
+pip install -e ".[dev,ingest]"        # core + document conversion
+# optional extras: .[ocr] (scanned documents), .[rerank] (model2vec channels)
+
+mosaic build ./my_documents -o ./index_docs
+mosaic search "how do I wire the differential breaker" ./index_docs --top 5
+mosaic explain <doc_id> ./index_docs --query "..."   # why did it match?
 ```
 
-`--hybride` stores BM25 postings (`bm25.msbm`) over the same token stream the grid sees
-(canonicalization + collocations) and implies `--rerank-vectors`. It is opt-in because a
-bag of words reveals more about your documents than the grid does — the storage trade-off
-is yours to make, never a silent default. `--fusion` ranks the whole corpus per channel,
-fuses by Reciprocal Rank Fusion (K=60), drops any channel with no signal on the query,
-and reports each result's per-channel rank for explainability. Because the grid+BM25 duo
-*without* embeddings measured below BM25 alone (0.460 < 0.482), fusion requires all three
-channels and fails loudly otherwise.
-
-### Typed grids (`--grilles-typees`)
-
-The encoder can **sort at write time**: each kind of data goes to *its own* grid — meaning
-words in one, identifiers (reference codes) in another, path tokens in a third, plus any
-custom types your profile declares (`grilles` key, routing patterns). Each grid gets its
-own recipe: weights (the ref grid is pure signature — an identifier is lexical), smoothing
-(never on identifiers — pulling two neighboring codes together manufactures confusions),
-and dimensions sized to its actual vocabulary (reported by `stats()`). At read time the
-synthesis weighs each grid by the query's idf mass per type, with **precedence for the ref
-reading** when the query carries an identifier (rare token, df ≤ 2 — threshold calibrated
-by measurement); `lectures` exposes the per-grid cosine.
+Everything is JSON on stdout — built for agents first, readable by humans. For agent
+frameworks, run the MCP server (`infra_mcp/mosaic_mcp.py`): indexes stay open in
+memory, warm answers in tens of milliseconds. Real output from the bundled benchmark
+(paraphrased queries, no keyword overlap with the documents):
 
 ```bash
-mosaic build ./docs -o ./index --grilles-typees
-mosaic search "a9f77216 breaker" ./index    # the synthesis routes by itself
+$ mosaic search "melanger de l'huile et un jaune pour une sauce onctueuse" ./index_bench --rerank
+[{"id": "04_mayonnaise.md", "score": 0.4988, "score_rerank": 0.5507}, ...]
 ```
 
-Measured on 500 real product records (private corpus — the replayable public counterpart
-is the bundled bench: `python bench/run_bench.py bench/corpus bench/verite.jsonl
---grilles-typees`, 12/12 top-1 vs 11/12 standard) against the standard engine *with* its
-facet-based ref boost: a reference drowned in noise words **0.90 vs 0.825**, bare
-reference 0.9833 vs 0.975, cross-vendor join 1.0 on both sides, plain designations 0.9333
-vs 0.9667 — with a meaning grid **4× smaller** (3,072 dims vs 12,288) when the vocabulary
-allows it (grid dimensions grow automatically with vocabulary, so the saving is
-corpus-dependent). On prose with nothing to sort
-(Alloprof) it is neutral-to-slightly-negative, so it stays **opt-in per corpus**, never a
-default. Existing indexes remain readable and searchable unchanged. `--rerank` works on a
-typed index (build with `--grilles-typees --rerank-vectors`): the λ·synthesis +
-(1−λ)·cos_m2v blend re-sorts the top-depth, and the ref reading keeps **primary-key
-precedence** — an embedding cosine cannot dethrone the exact holder of an identifier.
-Measured on the 500-record product bench: bare ref 0.9917 (vs 0.9833 without rerank),
-drowned ref 0.9083 (vs 0.90), designations unchanged — the reranker helps on identifier
-terrain and costs nothing elsewhere.
+**Requirements:** Python ≥ 3.12, any OS (CI runs Linux; developed on Windows). No GPU,
+no network access at runtime. Core dependency: numpy only.
 
-### Embeddings (optional but recommended)
+## Measured performance
 
-The third encoding channel uses a static [model2vec](https://github.com/MinishLab/model2vec)
-table distilled from fastText. Build it once, locally:
+Headline numbers — the methods, the defeats and the full campaign stories are in
+[docs/MEASURES.md](docs/MEASURES.md), and every figure is replayable from `bench/` or
+`research/`.
 
-```bash
-python scripts/import_wikdict.py      # optional EN->FR lexicon bridge
-python scripts/prepare_potion.py      # builds the local embedding table
-mosaic build ./docs -o ./index --embeddings <table.msee> --abtt 2 --rerank-vectors
-```
+| Benchmark | Result |
+|---|---|
+| Bundled paraphrase bench (40 docs, 12 traps) | 11/12 top-1 default, **12/12** with `--grilles-typees` |
+| Alloprof (2,556 docs, 2,316 real queries) — single systems | Mosaic calibrated 0.385 R@10 > model2vec 0.379; BM25 0.482 |
+| Alloprof — fusions | standard hybrid 0.498 < three-channel 0.517 < **engine quartet with `--atlas` 0.5461** (29 ms/query) |
+| Real product records (private corpus, 500 refs) | drowned reference 0.90 vs 0.825 standard; bare ref 0.9917 with rerank |
 
-## How it works
-
-Each document is encoded into a color grid — **12,288 dimensions (64×64×3) by default**;
-with typed grids, each grid is sized to its own vocabulary within the (c,c,3) family, so
-every grid still renders as a mosaic. The grid superposes three
-channels: a deterministic SHA-seeded **signature** per token, a **co-occurrence profile**
-learned from *your* corpus (PPMI + truncated SVD), and optionally a static **embedding**.
-Search is a cosine against int8-quantized vectors — one reading per grid on a typed
-index, synthesized by the query's idf mass. Separate channels carry **relations**
-(hyperdimensional binding by circular permutation) and the **belief memory** (bipolar MAP
-vectors). Everything is seeded, integer-quantized, and reproducible — the int8 quantization
-provably absorbs cross-machine BLAS variance (measured: 0 changed values out of 24.5M).
-
-The research behind the design decisions ships with the code (`research/`): superposition
-capacity limits, multi-hop traversal viability (pure-value binding, cleanup per hop),
-conformal abstention, held-out deterministic ground truth — every mechanism was measured
-before it was built.
-
-## Measured footprint & performance
-
-Real numbers, measured on production indexes (Windows, plain CPU, default 64×64×3 grid):
+Footprint, measured on production indexes (default 64×64×3 grid, plain CPU):
 
 | Metric | Small index (579 docs) | Large index (18,070 docs) |
 |---|---|---|
 | Disk total | 1.55 GB | 3.79 GB |
-| — document grids (`docs.msei`, int8) | **12.1 KB/doc** | 12.1 KB/doc |
-| — co-occurrence profiles (`vocab.msev`) | 48.4 KB/word × 31k words | 48.2 KB/word × 72k words |
-| Warm search latency (MCP server, float32 cache) | **27 ms** | **63 ms** |
-| Warm search latency (memory-lean int8 path) | 27 ms | 832 ms |
-| Cold CLI call (incl. Python startup) | 1.9 s | — |
-| Process RAM with index open | — | **373 MB** |
-| Full build, embeddings + reranker + SVD (40 docs) | 14.5 s | scales ~linearly |
+| — document grids (int8) | **12.1 KB/doc** | 12.1 KB/doc |
+| — co-occurrence profiles | 48.4 KB/word × 31k words | 48.2 KB/word × 72k words |
+| Warm search latency (MCP server) | **27 ms** | **63 ms** |
+| Process RAM with index open | — | **373 MB** (lazy memmaps) |
+| Full build, all channels (40 docs) | 14.5 s | scales ~linearly, nightly-batch |
 
-How to read this:
+Levers if you need smaller/faster: `--grid 32x32` (÷4 every vector cost),
+`--grilles-typees` on structured corpora (meaning grid up to 4× smaller, measured),
+`--smoothing-rank 0` (skip the SVD: faster build, lower recall), skip optional extras.
 
-- **A document costs ~12 KB.** The per-document grid is tiny; disk is dominated by the
-  **vocabulary** (one 48 KB float32 profile per distinct word). Index size ≈ vocab × 48 KB.
-- **RAM does not pay for disk.** Indexes open as lazy memory-maps: the 3.8 GB index runs in
-  ~370 MB of process RAM — only the profile rows your queries touch are ever read.
-- **Latency scales linearly with corpus size** (int8 cosine over all documents). The MCP
-  server keeps indexes open (warm path); the CLI pays Python startup on every call.
-- **Levers if you need smaller/faster:** `--grid 32x32` divides every vector cost by ~4;
-  on structured corpora `--grilles-typees` shrinks the meaning grid 4× *and* improves
-  identifier lookup (measured above); `--smoothing-rank 0` skips the SVD (faster builds,
-  lower recall); skipping `--rerank-vectors` and embeddings keeps the engine pure and
-  minimal.
-- **Typed grids change the arithmetic:** each grid's vocabulary costs dims × 4 bytes — a
-  3,072-dim meaning grid is 12 KB/word, a 768-dim identifier grid 3 KB/word. The
-  18k-document index above was rebuilt with `--grilles-typees` and verified in place:
-  12/12 identifier lookups at rank 1, 27–154 ms warm.
-- One-time shared artifacts: the optional embedding table is **84 MB** (built locally by
-  `scripts/prepare_potion.py`, shared across all indexes).
-- Belief memory: ~1 ms per assert/read, **82 MB per 50,000 facts** (measured,
-  `research/bench_croyance_echelle.py`).
+## How it works — the tiles of the mosaic
 
-Every number above is reproducible: build the bundled `bench/corpus` and time it yourself.
+Each document is encoded into a color grid — **12,288 dimensions (64×64×3) by
+default**; typed grids size each grid to its own vocabulary in the (c,c,3) family, so
+every grid still renders as a mosaic. The grid superposes a deterministic SHA-seeded
+**signature** per token, a **co-occurrence profile** learned from *your* corpus
+(PPMI + truncated SVD), and optionally a static **embedding**. Search is a cosine
+against int8-quantized vectors — one reading per grid on a typed index, synthesized by
+the query's idf mass.
+
+<p align="center"><img src="docs/grid_example.png" width="256" alt="A document, as Mosaic sees it: a color grid"><br><em>A real document from the bundled benchmark, as the engine sees it.</em></p>
+
+Around that core, the other tiles: **BM25 postings** over the same token stream
+(`--hybride`); a **semantic atlas** (`--atlas`) — a SOM learned from the co-occurrence
+profiles, so neighboring cells hold related tokens, whose document heatmaps form a
+4th fusion channel with errors decorrelated from the grid's; **relations**
+(hyperdimensional binding by circular permutation) for graph hops; the **belief
+memory** (bipolar MAP vectors) with conformal calibration.
+
+Determinism, stated precisely: on a given machine, the same corpus produces the same
+index bit for bit; across machines, the int8-quantized search matrix is provably
+identical (BLAS float variance is absorbed by quantization — measured: 0 changed
+values out of 24.5M) while float artifacts may differ in inert decimals — the
+*ranking* is identical everywhere.
+
+The research behind every design decision ships with the code (`research/`):
+superposition capacity limits, multi-hop viability, conformal abstention, the atlas
+track including its measured dead end — every mechanism was measured before it was
+built, and the burials are documented next to the graduations.
 
 ## Language support (read this before installing)
 
-Mosaic is currently **French-first**: the tokenizer, stopword list, bundled lexicons and the
-recommended embedding table are built for French corpora.
+Mosaic is currently **French-first**: tokenizer, stopwords, bundled lexicons and the
+recommended embedding table target French corpora.
 
-- **French** — native, fully supported. All benchmarks above are French.
-- **English queries over French documents** — supported through a deterministic ~11.8k-term
-  lexicon bridge; measured equivalent to the native French query when the terms are covered.
-- **Other Latin languages** (ES/IT/PT/DE) — partially usable (Latin tokenizer), no bundled
-  lexicon yet.
-- **Non-Latin scripts (Arabic, CJK…)** — **not supported yet** (the tokenizer is
-  Latin-only); a query returns an empty list, not bad results.
+- **French** — native, fully supported; all benchmarks above are French.
+- **English queries over French documents** — supported through a deterministic
+  ~11.8k-term lexicon bridge.
+- **Other Latin languages** (ES/IT/PT/DE) — partially usable, no bundled lexicon yet.
+- **Non-Latin scripts (Arabic, CJK…)** — **not supported yet**: a query returns an
+  empty list, not bad results.
 
-The **CLI is French-first** too (`mosaic calibrer`, `chemin`, `actuel`, `--explique`…).
-Human-mode explanations are bilingual (`--langue en`); English command aliases are on the
-roadmap.
+The CLI is French-first too (`calibrer`, `chemin`, `actuel`, `--explique`…);
+human-mode explanations are bilingual (`--langue en`).
 
 ## Limitations — the honest list
 
-- **Bag-of-words semantics.** Word order beyond learned collocations is not encoded; it
-  retrieves by lexical-semantic content, not fine-grained syntax. A large transformer will
-  beat it on subtle nuance — that is the price of sovereignty, and the reranker narrows it.
+- **Bag-of-words semantics.** Word order beyond learned collocations is not encoded; a
+  large transformer will beat it on subtle nuance — that is the price of sovereignty,
+  and the reranker narrows it.
 - **Linear scan latency.** Search is a full-corpus cosine: excellent up to tens of
-  thousands of documents (63 ms @ 18k docs on the warm server path), not designed for
-  millions.
-- **Disk is vocabulary-driven** (~48 KB per distinct word). Very large vocabularies mean
-  multi-GB indexes — RAM stays low (lazy memmaps), but budget the disk.
-- **The engine recalls; it does not read.** It returns the right documents and why — your
-  agent (or you) still reads them.
+  thousands of documents (63 ms @ 18k docs warm), not designed for millions — and the
+  measured sub-linear shortcut (pyramid prefilter) failed its bench, so we did not
+  ship it.
+- **Disk is vocabulary-driven** (~48 KB per distinct word on the default grid). Large
+  vocabularies mean multi-GB indexes; RAM stays low (lazy memmaps), budget the disk.
+- **The engine recalls; it does not read.** It returns the right documents and why —
+  your agent (or you) still reads them.
 
 ## Project status
 
 **v0.1 — early.** Extracted from a private codebase where it was built and benchmarked
-against real business corpora (thousands of real documents, ~540 tests, measured research
-notes in `research/`). Day-to-day production usage is just beginning: expect rough edges,
-and expect honest fixes.
+against real business corpora (thousands of real documents, ~550 tests, measured
+research notes in `research/`). Day-to-day production usage is just beginning: expect
+rough edges, and expect honest fixes.
 
 ## Why not just…
 
-- **…BM25?** Beaten on paraphrase benchmarks by the co-occurrence + embedding channels —
-  but it wins alone on lexical terrain (see the Alloprof benchmark above), which is why
-  the measured winner is the three-channel fusion, not either system alone (BM25 baseline
-  ships in `bench/` — measure it on your own corpus).
+- **…BM25?** It wins alone on lexical terrain (we publish that defeat) and loses on
+  paraphrase; the measured winner on lexical terrain is the fusion *with* the grid's
+  decorrelated errors, not either system alone. The baseline ships in `bench/` —
+  measure it on your own corpus.
 - **…an embeddings API?** Every indexed document is a paid API call, re-paid on every
   rebuild, and your data leaves the machine. Mosaic rebuilds nightly for free, offline.
-- **…a static embedding model alone (model2vec)?** Measured twice. On the bundled
-  paraphrase benchmark: embeddings-only scores **MRR 0.830**, the home-grown channels
-  alone (signature + corpus-learned co-occurrence) score **0.958**. On the 2,556-document
-  Alloprof benchmark above — hostile terrain — calibrated Mosaic still edges model2vec
-  (0.385 vs 0.379 Recall@10), and fusing both with BM25 beats every single system and the
-  standard hybrid. The corpus-learned channel is not decoration. Reproduce it yourself:
-  `mosaic calibrer bench/corpus --requetes bench/verite.jsonl --embeddings <table>`.
+- **…a static embedding model alone (model2vec)?** Measured twice: behind the
+  corpus-learned channels on the bundled paraphrase bench (MRR 0.830 vs 0.958) and
+  behind calibrated Mosaic on Alloprof (0.379 vs 0.385). The corpus-learned channel is
+  not decoration.
 - **…a vector database?** That is infrastructure to run and secure. Mosaic is files on
   disk and one Python process.
 
 ## Scientific background
 
-The mechanisms are standard, measured, and referenced in the code: PPMI + truncated SVD
-(LSA lineage), hyperdimensional computing / MAP-VSA binding (Kanerva; Gayler), reciprocal
-rank fusion (Cormack et al.), conformal prediction for calibrated abstention (Vovk et al.),
-static embeddings via model2vec distillation.
+The mechanisms are standard, measured, and referenced in the code: PPMI + truncated
+SVD (LSA lineage), hyperdimensional computing / MAP-VSA binding (Kanerva; Gayler),
+self-organizing maps (Kohonen) for the atlas, reciprocal rank fusion (Cormack et al.),
+conformal prediction for calibrated abstention (Vovk et al.), static embeddings via
+model2vec distillation.
 
 ## Design principles
 
-1. **Deterministic or explicit.** Same input, same ranking, any machine — and bit-for-bit
-   reproducible on the same machine. What cannot be guaranteed (float decimals across
-   BLAS implementations) is stated, never silently degraded.
-2. **The engine recalls, the caller judges.** Scores, margins, provenance and explanations
-   are always exposed; ambiguity raises a flag instead of a silent guess.
+1. **Deterministic or explicit.** Same input, same ranking, any machine — bit-for-bit
+   reproducible on the same machine. What cannot be guaranteed is stated, never
+   silently degraded.
+2. **The engine recalls, the caller judges.** Scores, margins, provenance and
+   explanations are always exposed; ambiguity raises a flag instead of a silent guess.
 3. **Parameters describe *your world*, never the geometry.** Profiles configure roles,
-   types and codes; encoding weights are calibrated by measurement; the core invariants
-   (hashing, quantization, dimensions) are not knobs.
-4. **Agent-first interfaces.** Compact JSON everywhere, usage guidance embedded in the MCP
-   tool descriptions, errors that tell the caller how to fix the call.
+   types and codes; weights are calibrated by measurement; the core invariants are not
+   knobs.
+4. **Measured, defeats included.** No feature ships without a bench; no bench is
+   quoted only when it flatters. The dead ends stay in `research/` next to the
+   graduations.
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest -q            # ~540 tests, two CI regimes (with and without optional extras)
+pytest -q            # ~550 tests, two CI regimes (with and without optional extras)
 ruff check && ruff format
 ```
 
