@@ -1,41 +1,36 @@
 # Mosaic
 
-**A sovereign semantic search engine — a mosaic of retrieval methods, assembled and
-calibrated by measurement on *your* corpus. Local, deterministic, no LLM in the loop.**
+**Semantic search over your own documents, built in the open from textbook parts —
+local, deterministic, no LLM in the loop. As much a working lesson as a tool.**
 
-The name is the architecture. Mosaic is not one clever algorithm: it is several
-complementary retrieval processes — a semantic grid learned from your corpus, exact
-lexical postings, static embeddings, a learned semantic atlas — each one measured,
-kept only where it wins, and fused only where fusion wins. No cloud, no GPU, no
-per-query bill, no data ever leaving your machine. The same corpus produces the same
-index and the same ranking, on any machine.
+Mosaic is one practitioner's answer to one practitioner's constraints: a small
+business's documents made searchable by *meaning*, with no cloud, no GPU, no per-query
+bill, and results that can be trusted because they can be reproduced. It does not
+claim to reinvent retrieval. The mechanisms are textbook — co-occurrence statistics in
+the LSA lineage, hyperdimensional computing, BM25, self-organizing maps, rank fusion —
+and where a standard tool wins, the benches below say so in print.
+
+What the name promises is the only originality claimed: an *assembly*. Not one clever
+algorithm but several complementary retrieval processes — a semantic grid learned from
+your corpus, exact lexical postings, static embeddings, a learned semantic atlas —
+each one measured, kept only where it wins, fused only where fusion wins, and
+calibrated on *your* corpus rather than on doctrine. The same corpus produces the same
+index and the same ranking, on any machine, and no data ever leaves yours.
+
+Take it accordingly: first as a **didactic experiment** — an engine assembled from
+measurable parts, every design decision settled by a bench you can rerun, the dead
+ends documented next to the wins. It does run in production here, and if your
+constraints resemble the author's — local-first, deterministic, French-heavy corpora,
+agents in the loop — it may serve you as a tool too. Contributions from professionals
+of the field are warmly welcome, and understood accordingly: corrections, measures,
+stronger baselines, proofs that a design choice is wrong. They feed an educational
+resource more than a product roadmap — beat a number in this README on its own bench,
+and the result belongs here, whichever way it points.
 
 It is built **agent-first** — compact JSON everywhere, an MCP server, usage guidance
 embedded in tool descriptions: your agent sees five lines of JSON instead of thousands
 of tokens of raw files — and **human-usable**: a plain CLI, explanations on demand
 (`explain`, `--explique`), nothing you cannot run and read yourself.
-
-## What this is — read this first
-
-Mosaic is one practitioner's answer to one practitioner's constraints: a small
-business's documents made searchable by meaning, with no cloud, no GPU, no per-query
-bill, and results that can be trusted because they can be reproduced. It does not claim
-to reinvent retrieval. The mechanisms are textbook — co-occurrence statistics in the
-LSA lineage, hyperdimensional computing, BM25, self-organizing maps, rank fusion — and
-where a standard tool wins, the benches below say so in print.
-
-So take it first as a **didactic experiment**: an engine assembled from measurable
-parts, every design decision settled by a bench you can rerun, the dead ends documented
-next to the wins. It does run in production here, and if your constraints resemble the
-author's — local-first, deterministic, French-heavy corpora, agents in the loop — it
-may serve you as a tool too. But the honest frame is a working lesson in building
-sovereign semantic search, not the announcement of a revolutionary product.
-
-Contributions from professionals of the field are warmly welcome, and understood
-accordingly: corrections, measures, stronger baselines, proofs that a design choice is
-wrong. They feed an educational resource more than a product roadmap — if you can beat
-a number in this README on its own bench, that result belongs here, whichever way it
-points.
 
 ## The idea
 
