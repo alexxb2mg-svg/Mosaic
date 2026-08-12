@@ -1028,6 +1028,7 @@ class Index:
 
     def _add_grilles(self, flux_add: dict[str, list[str]]) -> None:
         """Phase 4a — maintient chaque grille typée (learn/finalize/lissage/encode)."""
+        assert self.grilles is not None  # garde posée par l'appelant (add)
         for t, g in self.grilles.items():
             toks_t = flux_add.get(t, [])
             g.profiles.learn(toks_t)
@@ -1052,6 +1053,7 @@ class Index:
     ) -> None:
         """Phase 4b — même flux de tokens que les grilles (invariant du canal : les
         deux voient le même monde, cf. build) — index typé : le flux COMPLET."""
+        assert self.bm25 is not None  # garde posée par l'appelant (add)
         complet = (
             tokens
             if flux_add is None
@@ -1062,7 +1064,7 @@ class Index:
     def _add_grammatical(self, text: str) -> None:
         """Phase 4c — canal grammatical du nouveau document, analysé sur son TEXTE
         brut (extension métier relue depuis le profil persisté)."""
-        assert self.gram_norms is not None
+        assert self.gram_mat is not None and self.gram_norms is not None
         v_g, n_g = grammaire_module.canal_document(
             text,
             self.grid[0] * self.grid[1] * self.grid[2],
@@ -1075,6 +1077,7 @@ class Index:
         """Phase 4d — carte du nouveau document via le mapping FIGÉ au build : la
         SOM n'est pas incrémentale, les tokens inconnus du build ne contribuent
         pas (dérive observable via stats(), re-placée au rebuild nightly)."""
+        assert self.atlas_positions is not None
         assert self.atlas_mat is not None and self.atlas_norms is not None
         m = atlas_module.carte(
             tokens, self.profiles.rows, self.atlas_positions, self.profiles.idf
@@ -1087,6 +1090,7 @@ class Index:
         """Phase 4e — add() n'a pas de notion de corpus_dir : file.name n'a jamais
         de segment de dossier -> canal vide (zéros), jamais d'erreur (spec
         §Relations tirées du chemin)."""
+        assert self.relations_mat is not None  # garde posée par l'appelant (add)
         regles = profil_module.roles_du_profil(self.profil)
         rels = (
             entities_from_path_profil(file.name, regles)
