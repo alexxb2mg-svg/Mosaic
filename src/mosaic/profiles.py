@@ -11,11 +11,16 @@ from mosaic.tokenize import STOPWORDS
 
 WINDOW = 5
 
-# Retour du chargeur différé (v1.5 chargement paresseux) : (pair_counts, marginals, total_mass) —
-# même triplet que ce que load_vocab(lazy=True) matérialiserait immédiatement en mode eager.
-SparseLoader = Callable[
-    [], tuple[dict[tuple[int, int], float], dict[int, float], float]
-]
+# Consolidation du tampon de paires : au-delà de ce nombre d'entrées en attente, le
+# tampon Python est fondu dans les tableaux triés (np.unique + bincount). Amorti :
+# chaque paire est consolidée O(log) fois. ~1 M d'entrées ≈ quelques dizaines de Mo
+# de tampon — le pic RAM est borné par ce seuil, plus par la taille du corpus.
+_SEUIL_CONSOLIDATION = 1_000_000
+
+# Retour du chargeur différé (v1.5 chargement paresseux) :
+# (pair_keys, pair_vals, marginals, total_mass) — même quadruplet que ce que
+# load_vocab(lazy=True) matérialiserait immédiatement en mode eager.
+SparseLoader = Callable[[], tuple[np.ndarray, np.ndarray, dict[int, float], float]]
 
 
 class Profiles:
@@ -24,8 +29,17 @@ class Profiles:
         self.rows: dict[str, int] = {}
         self.acc = np.zeros((0, dim), dtype=np.float32)
         # Comptages épars accumulés par learn() — vérité brute, jamais écrasée.
-        # Clé symétrique (row_min, row_max) : chaque paire non ordonnée stockée une fois.
-        self.pair_counts: dict[tuple[int, int], float] = {}
+        # Clé symétrique (row_min << 32) | row_max : chaque paire non ordonnée UNE fois,
+        # dans deux tableaux alignés TRIÉS par clé (pair_keys int64, pair_vals float64).
+        # C'était un dict {(i, j): float} : ~230 octets par paire de surcoût Python —
+        # le PLAFOND RAM du build sur les gros corpus (mesuré research/ram_build.py).
+        # Les tableaux portent la même vérité pour 16 octets/paire, et les poids étant
+        # des ENTIERS en float (6-d ∈ 1..5), les sommes sont exactes quel que soit le
+        # chemin d'accumulation : finalize() reste bit-identique à la version dict.
+        self.pair_keys = np.zeros(0, dtype=np.int64)
+        self.pair_vals = np.zeros(0, dtype=np.float64)
+        self._buf_keys: list[int] = []
+        self._buf_w: list[float] = []
         self.marginals: dict[int, float] = {}
         self.total_mass: float = 0.0
         self.counts: dict[str, int] = {}
@@ -33,23 +47,41 @@ class Profiles:
         self.n_docs = 0
         self._sig_cache: dict[str, np.ndarray] = {}
         # v1.5 chargement paresseux (store.load_vocab(..., lazy=True)) : quand acc est un
-        # np.memmap read-only sur vocab.msev, le bloc épars (pair_counts/marginals/total_mass)
+        # np.memmap read-only sur vocab.msev, le bloc épars (pair_keys/pair_vals/marginals/total_mass)
         # n'a pas été analysé au chargement — ce callable, posé par store.py, fait le travail
         # complet à la demande. None = rien en attente (cas normal : learn()/finalize() direct).
         self._pending_sparse: SparseLoader | None = None
 
     def _materialize_sparse(self) -> None:
-        """Déclenche le chargeur différé une fois, avant tout usage de pair_counts/marginals/
-        total_mass. No-op si rien n'est en attente (immense majorité des appels)."""
+        """Déclenche le chargeur différé une fois, avant tout usage de pair_keys/pair_vals/
+        marginals/total_mass. No-op si rien n'est en attente (immense majorité des appels)."""
         if self._pending_sparse is not None:
             loader = self._pending_sparse
             self._pending_sparse = None
-            self.pair_counts, self.marginals, self.total_mass = loader()
+            self.pair_keys, self.pair_vals, self.marginals, self.total_mass = loader()
+
+    def _consolider(self) -> None:
+        """Fond le tampon de paires dans les tableaux triés. Sommes float64 de valeurs
+        entières : exactes, donc indifférentes à l'ordre de consolidation."""
+        if not self._buf_keys:
+            return
+        cles = np.concatenate(
+            [self.pair_keys, np.array(self._buf_keys, dtype=np.int64)]
+        )
+        vals = np.concatenate([self.pair_vals, np.array(self._buf_w, dtype=np.float64)])
+        self._buf_keys.clear()
+        self._buf_w.clear()
+        uniques, inverse = np.unique(cles, return_inverse=True)
+        self.pair_keys = uniques
+        self.pair_vals = np.bincount(inverse, weights=vals, minlength=len(uniques))
 
     def _sig(self, token: str) -> np.ndarray:
         s = self._sig_cache.get(token)
         if s is None:
-            s = signature(token, self.dim)
+            # Cache en int8 : les valeurs sont ternaires {-1, 0, 1}, l'int32 de
+            # signature() coûtait 4x la RAM (2,5 Go à 50k mots en grille 64) pour
+            # les MÊMES float32 après le .astype des consommateurs — bit-identique.
+            s = signature(token, self.dim).astype(np.int8)
             self._sig_cache[token] = s
         return s
 
@@ -83,11 +115,14 @@ class Profiles:
                 w = float(6 - d)
                 idx_a = self._row(t_a)
                 idx_b = self._row(t_b)
-                key = (idx_a, idx_b) if idx_a <= idx_b else (idx_b, idx_a)
-                self.pair_counts[key] = self.pair_counts.get(key, 0.0) + w
+                key = (idx_a << 32) | idx_b if idx_a <= idx_b else (idx_b << 32) | idx_a
+                self._buf_keys.append(key)
+                self._buf_w.append(w)
                 self.marginals[idx_a] = self.marginals.get(idx_a, 0.0) + w
                 self.marginals[idx_b] = self.marginals.get(idx_b, 0.0) + w
                 self.total_mass += w
+        if len(self._buf_keys) >= _SEUIL_CONSOLIDATION:
+            self._consolider()
 
     def finalize(self, weighting: str = "brut") -> None:
         """Matérialise self.acc (float32, V×dim) à partir des comptages épars.
@@ -96,8 +131,9 @@ class Profiles:
         - "ppmi" : poids = max(0, ln(total_mass·comptage / (marginal_i·marginal_j))),
           PPMI symétrique.
 
-        Itère les paires triées par clé (row_min, row_max) : le résultat ne dépend
-        que des comptages accumulés, jamais de l'ordre d'insertion dans le dict.
+        Itère les paires triées par clé (row_min, row_max) — l'ordre du tri int64
+        (i << 32) | j est EXACTEMENT l'ordre lexicographique des tuples (i, j) de la
+        version dict : le résultat ne dépend que des comptages accumulés.
         Comme self.acc est alloué d'un coup à sa taille finale (V×dim), les indices
         de lignes sont résolus (via rows) avant toute écriture — pas de tableau qui
         grandit pendant l'accumulation, donc pas d'aliasing possible.
@@ -107,6 +143,7 @@ class Profiles:
                 f"weighting inconnu : {weighting!r} (attendu 'brut' ou 'ppmi')"
             )
         self._materialize_sparse()
+        self._consolider()
         n = len(self.rows)
         # Réallocation complète et inconditionnelle : c'est ce qui libère un acc memmap
         # (v1.5 chargement paresseux) hérité de store.load_vocab(lazy=True) — plus aucune
@@ -114,14 +151,16 @@ class Profiles:
         # ouvert sur vocab.msev quand _save() voudra le ré-écrire (piège Windows : un
         # memmap actif verrouille le fichier contre l'écrasement).
         self.acc = np.zeros((n, self.dim), dtype=np.float32)
-        if n == 0 or not self.pair_counts:
+        if n == 0 or self.pair_keys.size == 0:
             return
         tokens_by_row: list[str] = [""] * n
         for token, idx in self.rows.items():
             tokens_by_row[idx] = token
-        for key in sorted(self.pair_counts):
-            i, j = key
-            w = self.pair_counts[key]
+        for key, w in zip(
+            self.pair_keys.tolist(), self.pair_vals.tolist(), strict=True
+        ):
+            i = key >> 32
+            j = key & 0xFFFFFFFF
             if weighting == "brut":
                 poids = w
             else:

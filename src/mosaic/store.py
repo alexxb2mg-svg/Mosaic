@@ -319,12 +319,14 @@ def save_vocab(
         meta.update(extra_meta)
     acc = np.ascontiguousarray(profiles.acc[: len(order)], dtype=np.float32)
 
-    # Bloc épars, itéré trié — déterminisme indépendant de l'ordre d'insertion des dicts.
-    pair_keys = sorted(profiles.pair_counts)
-    n_pairs = len(pair_keys)
-    rows_arr = np.array([k[0] for k in pair_keys], dtype=np.uint32)
-    cols_arr = np.array([k[1] for k in pair_keys], dtype=np.uint32)
-    poids_arr = np.array([profiles.pair_counts[k] for k in pair_keys], dtype=np.float32)
+    # Bloc épars — les tableaux de Profiles sont déjà triés par clé (i, j) et la
+    # consolidation du tampon est forcée : mêmes octets que la version dict historique.
+    profiles._materialize_sparse()
+    profiles._consolider()
+    n_pairs = int(profiles.pair_keys.size)
+    rows_arr = (profiles.pair_keys >> 32).astype(np.uint32)
+    cols_arr = (profiles.pair_keys & 0xFFFFFFFF).astype(np.uint32)
+    poids_arr = profiles.pair_vals.astype(np.float32)
 
     marg_keys = sorted(profiles.marginals)
     n_marg = len(marg_keys)
@@ -355,7 +357,7 @@ def save_vocab(
 
 def _parse_sparse_block(
     raw: bytes, off: int = 0
-) -> tuple[dict[tuple[int, int], float], dict[int, float], float]:
+) -> tuple[np.ndarray, np.ndarray, dict[int, float], float]:
     """Analyse le bloc épars (paires + marginaux + masse totale) à partir de `off` dans `raw`.
 
     Factorisé pour être appelable soit immédiatement (load_vocab eager), soit en différé
@@ -380,17 +382,15 @@ def _parse_sparse_block(
     except struct.error:
         raise ValueError("vocab.msev tronqué ou corrompu") from None
 
-    pair_counts = {
-        (int(r), int(c)): float(w)
-        for r, c, w in zip(
-            rows_arr.tolist(), cols_arr.tolist(), poids_arr.tolist(), strict=True
-        )
-    }
+    # Clés recomposées (i << 32) | j : écrites triées par save_vocab, relues telles
+    # quelles. .copy() détache les tableaux du buffer `raw` (frombuffer = vue).
+    pair_keys = ((rows_arr.astype(np.int64) << 32) | cols_arr.astype(np.int64)).copy()
+    pair_vals = poids_arr.astype(np.float64)
     marginals = {
         int(r): float(w)
         for r, w in zip(marg_rows_arr.tolist(), marg_arr.tolist(), strict=True)
     }
-    return pair_counts, marginals, float(total_mass)
+    return pair_keys, pair_vals, marginals, float(total_mass)
 
 
 def load_vocab(
@@ -426,7 +426,8 @@ def _load_vocab_eager(
         # v1.0 : acc int32, aucun comptage épars — lecture seule (add() refusé côté Index).
         acc_i32 = np.frombuffer(raw, dtype=np.int32, count=n * dim).reshape(n, dim)
         p.acc = acc_i32.astype(np.float32).copy()
-        p.pair_counts = {}
+        p.pair_keys = np.zeros(0, dtype=np.int64)
+        p.pair_vals = np.zeros(0, dtype=np.float64)
         p.marginals = {}
         p.total_mass = 0.0
         result_meta["legacy"] = True
@@ -440,7 +441,9 @@ def _load_vocab_eager(
         .reshape(n, dim)
         .copy()
     )
-    p.pair_counts, p.marginals, p.total_mass = _parse_sparse_block(raw, off=4 * n * dim)
+    p.pair_keys, p.pair_vals, p.marginals, p.total_mass = _parse_sparse_block(
+        raw, off=4 * n * dim
+    )
     result_meta["legacy"] = False
     return p, colloc, dict(meta.get("lexicon", {})), result_meta
 
@@ -498,9 +501,7 @@ def _load_vocab_lazy(
     )
     sparse_offset = acc_offset + acc_bytes
 
-    def _sparse_loader() -> tuple[
-        dict[tuple[int, int], float], dict[int, float], float
-    ]:
+    def _sparse_loader() -> tuple[np.ndarray, np.ndarray, dict[int, float], float]:
         with open(file, "rb") as f2:
             f2.seek(sparse_offset)
             raw = f2.read()

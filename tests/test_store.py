@@ -111,7 +111,8 @@ def test_msev_v11_round_trip_et_add(tmp_path):
     save_vocab(tmp_path, p, colloc, GRID, lex, extra_meta={"profile_weighting": "brut"})
 
     p2, colloc2, lex2, meta2 = load_vocab(tmp_path)
-    assert p2.pair_counts == p.pair_counts
+    assert np.array_equal(p2.pair_keys, p.pair_keys)
+    assert np.array_equal(p2.pair_vals, p.pair_vals)
     assert p2.marginals == p.marginals
     assert p2.total_mass == p.total_mass
     assert meta2.get("legacy") is False
@@ -158,7 +159,7 @@ def test_msev_v10_legacy_charge_mais_add_refuse(tmp_path):
     assert meta2["legacy"] is True
     assert p.acc.dtype == np.float32
     assert np.array_equal(p.acc[0], (5 * signature("cuivre", DIM)).astype(np.float32))
-    assert p.pair_counts == {} and p.marginals == {} and p.total_mass == 0.0
+    assert p.pair_keys.size == 0 and p.marginals == {} and p.total_mass == 0.0
 
     idx = Index.open(tmp_path)
     try:
@@ -312,7 +313,7 @@ def test_load_vocab_lazy_acc_est_un_memmap(tmp_path):
     assert colloc2 == colloc and lex2 == lex
     assert p2.rows == p.rows and p2.df == p.df and p2.n_docs == p.n_docs
     # Bloc épars non analysé tant que rien ne le déclenche.
-    assert p2.pair_counts == {} and p2.marginals == {} and p2.total_mass == 0.0
+    assert p2.pair_keys.size == 0 and p2.marginals == {} and p2.total_mass == 0.0
     assert p2._pending_sparse is not None
 
 
@@ -334,7 +335,8 @@ def test_load_vocab_lazy_valeurs_identiques_a_eager(tmp_path):
 
 def test_load_vocab_lazy_materialise_le_bloc_eparse_sans_mutation(tmp_path):
     """_materialize_sparse() seul (sans apprendre de nouveau document) restitue exactement
-    le pair_counts/marginals/total_mass d'origine — le chargeur différé n'invente rien."""
+    le bloc épars d'origine (pair_keys/pair_vals/marginals/total_mass) — le chargeur
+    différé n'invente rien."""
     p = Profiles(DIM)
     p.learn(["interrupteur", "différentiel", "salle", "bain"])
     p.learn(["interrupteur", "va-et-vient"])
@@ -345,7 +347,8 @@ def test_load_vocab_lazy_materialise_le_bloc_eparse_sans_mutation(tmp_path):
     p2, _, _, _ = load_vocab(tmp_path, lazy=True)
     p2._materialize_sparse()
     assert p2._pending_sparse is None
-    assert p2.pair_counts == p.pair_counts
+    assert np.array_equal(p2.pair_keys, p.pair_keys)
+    assert np.array_equal(p2.pair_vals, p.pair_vals)
     assert p2.marginals == p.marginals
     assert p2.total_mass == p.total_mass
 
@@ -365,9 +368,12 @@ def test_load_vocab_lazy_puis_learn_declenche_la_materialisation(tmp_path):
     p2.learn(["tableau", "disjoncteur"])  # déclenche _materialize_sparse() puis apprend
     assert p2._pending_sparse is None
     # Les paires d'origine sont toutes encore présentes (additivité).
-    assert set(p.pair_counts).issubset(p2.pair_counts)
-    for key, w in p.pair_counts.items():
-        assert p2.pair_counts[key] == w
+    p2._consolider()  # fond le tampon du nouveau document avant la comparaison
+    d1 = dict(zip(p.pair_keys.tolist(), p.pair_vals.tolist(), strict=True))
+    d2 = dict(zip(p2.pair_keys.tolist(), p2.pair_vals.tolist(), strict=True))
+    assert set(d1).issubset(d2)
+    for key, w in d1.items():
+        assert d2[key] == w
     p2.finalize("brut")
     assert "tableau" in p2.rows and "disjoncteur" in p2.rows
     assert isinstance(p2.acc, np.ndarray) and not isinstance(p2.acc, np.memmap)

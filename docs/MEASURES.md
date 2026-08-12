@@ -149,6 +149,36 @@ The meta-lesson is the doctrine itself: never change a default on a 12-query ben
 the judge runs before the graft, always. (Free datum from the same runs: the γ
 embeddings table is worth ~+4.7 pts R@10 in this configuration.)
 
+## The build RAM ceiling (measured, then lowered — bit-for-bit)
+
+Building full Alloprof (2,556 docs, 50k vocabulary, grid 64) peaked at **13.3 GB**
+of working set (`research/ram_build.py`). The obvious suspect — the co-occurrence
+pair dict, ~230 bytes of Python overhead per pair — turned out to be the *wrong*
+one: converting it to sorted int64/float64 arrays (16 bytes/pair) saved almost
+nothing at this scale. The measurement falsified the hypothesis; the real whale
+was the **SVD smoothing**, which materialized three full vocab×dims copies at
+once (the float64 input copy, the float64 reconstruction, and the float32 cast),
+plus a signature cache holding ternary {−1, 0, 1} values in int32.
+
+Three fixes, all provably bit-identical (same operations in the same order — only
+buffer lifetimes and storage widths changed; verified by sha256 of the complete
+index artifacts before/after, three times):
+
+1. pair counts as sorted arrays with a bounded consolidation buffer (the dict is
+   gone — and integer-valued float weights make every accumulation order exact);
+2. smoothing frees each n×d intermediate the moment it is dead, and writes its
+   result through an `out=` parameter instead of materializing a second cast copy;
+3. the signature cache stores int8 (same float32 values after the consumers' cast).
+
+Result: **8.6 GB peak (−36 %) and a 14 % faster build** (139 s → 120 s — fewer
+giant allocations). The remaining floor is arithmetic, not waste: the float64
+smoothing copy plus the float32 profile matrix ≈ 12 bytes × vocab × dims. Going
+below that (float32 SVD, chunked BLAS) would change the artifacts bit-for-bit and
+therefore invalidate every existing index — an explicit decision, not a cleanup.
+
+- Replay: `python research/ram_build.py <corpus> <index_out>` (Windows peak
+  working set; the same script runs on both code generations for an honest A/B).
+
 ## Buried tracks (ratified)
 
 - **Pyramid prefilter** (atlas step 3): failed its pre-declared criterion, and the

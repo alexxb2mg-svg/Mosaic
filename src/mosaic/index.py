@@ -75,7 +75,9 @@ def _apply_smoothing(profiles: Profiles, rank: int) -> None:
     if rank <= 0:
         return
     v = len(profiles.rows)
-    profiles.acc[:v] = smooth(profiles.acc[:v], rank)
+    # out=même tranche : évite la copie float32 intermédiaire n×d (plafond RAM du
+    # build — cf. smoothing.smooth, bit-identique garanti)
+    smooth(profiles.acc[:v], rank, out=profiles.acc[:v])
 
 
 class Index:
