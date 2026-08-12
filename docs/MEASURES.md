@@ -179,6 +179,42 @@ therefore invalidate every existing index — an explicit decision, not a cleanu
 - Replay: `python research/ram_build.py <corpus> <index_out>` (Windows peak
   working set; the same script runs on both code generations for an honest A/B).
 
+## The sharding bench (can capped indexes beat one big index?)
+
+The scale question, put to the judge (`research/shards_fusion.py`): split
+Alloprof into 4 indexes (balanced ~639 docs each, and deliberately unbalanced
+6 % / 19 % / 25 % / 50 %), search each shard per query, merge the local top-10s
+— predictions declared before measuring, and mostly falsified:
+
+- **Raw cosine concatenation loses ~5 pts of R@10 even with equal-size shards.**
+  Each shard learns its own profiles and IDF, so score scales drift apart:
+  cross-index scores are not directly comparable. (P1 falsified.)
+- **Rank fusion (RRF) over balanced shards beats the single index on recall**
+  (0.3809 vs 0.3216 R@10) but pays in MRR — a recall-channel profile, the same
+  shape the atlas showed. And the size bias is real and huge: in the unbalanced
+  split, the 6 % shard grabs **4.0×** its fair share of the fused top-10 (rank k
+  of a 164-doc index is worth much less than rank k of a 1,316-doc index; RRF
+  can't see that). (P2 half-falsified — the bias exists, but recall wins anyway.)
+- **The winner: per-shard z-normalization of scores.** Balanced shards + z-norm
+  reaches **0.3832 R@10 / 0.2229 MRR — better than the single index on both
+  metrics**. Reading: an ensemble effect — each shard's learned profiles make
+  its errors decorrelate from the others', and z-norm makes the scales
+  comparable without sacrificing top-rank precision the way RRF does. Honest
+  caveat: μ/σ estimated on only k=10 local scores; and on the unbalanced split
+  the small-shard bias persists (3.81×), though it costs less (0.3488/0.2056,
+  still the best fusion there).
+- **The naive bias fix is a disaster.** Weighting RRF contributions by corpus
+  share crushes small shards entirely (zero docs in any top-10, R@10 0.2051 —
+  worse than everything). A useful correction should act on the *depth*
+  requested from each shard, not on the weight of its ranks. (P5 falsified,
+  kept on the record.)
+
+Design rule this establishes: **shard at equal sizes** (cap each index's volume,
+open the next when full) **and fuse by per-shard z-normalized scores**. Sharded
+search costs +13 % sequentially and parallelizes per shard; the build peak is
+bounded by the largest shard. Replay:
+`python research/shards_fusion.py bench/alloprof/corpus bench/alloprof/verite.jsonl <workdir>`.
+
 ## Buried tracks (ratified)
 
 - **Pyramid prefilter** (atlas step 3): failed its pre-declared criterion, and the
