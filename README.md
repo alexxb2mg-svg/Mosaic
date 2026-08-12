@@ -186,14 +186,18 @@ flowchart TD
 | Folders that evolve over time, where stale versions are a trap | any of the above + `mosaic actuel` | temporal-truth bench (stale version ranked first by flat search, flagged by `actuel`) | free — reads the facets the index already stores |
 | Code repositories | **unknown — not measured yet** | open question; identifier-dense (typed grids are a candidate), but code has structure none of our benches cover | — |
 
-One **research** channel sits outside this table: semantic-atlas heatmaps (a
-SOM-organized grid, `research/atlas_som.py` / `atlas_fusion.py` / `atlas_capacite.py`).
-Fused as a 4th channel with the trio it measured **+2.8 pts Recall@10 and +3.7 MRR on
-the full Alloprof corpus** (0.532 vs 0.503, both with this bench's canonical-token BM25
-channel) — its errors decorrelate from the flat grid's. The bill: a build-time SOM over
-the whole vocabulary (~4 GB RAM peak and ~20 min at 72k words, chunked) — and its
-pyramid-prefilter variant was measured dead (step 3, control included). It is not an
-engine flag yet: adopting it is an open engineering decision.
+One more channel graduated from research to product: the **semantic atlas**
+(`--atlas`, requires `--hybride`) — a SOM-organized map of your vocabulary, learned
+from the co-occurrence profiles, that joins `--fusion` as a 4th channel. Engine
+acceptance on the full Alloprof corpus: the four-channel fusion reaches **0.5461
+R@10 vs 0.5035 for the trio (+4.3 pts)** at 29 ms/query — the map's errors
+decorrelate from the flat grid's, and the engine even beats the research prototype
+(0.5319) because it builds every channel on the same clean token stream. The bill is
+at build time: a SOM over the whole vocabulary (minutes, a few GB of RAM at large
+vocabularies, chunked) — which is why it is opt-in, never a default. The research
+that earned it ships in `research/` (`atlas_som.py`, `atlas_capacite.py`,
+`atlas_fusion.py`, `valider_atlas_moteur.py`) — including the dead end: the
+pyramid prefilter variant failed its criterion, control included.
 
 Two rules fall out of this table. First: **measure on your own corpus** — 20–40
 ground-truth queries and the bundled benches (`bench/run_bench.py`,

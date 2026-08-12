@@ -20,6 +20,7 @@ _MAGIC_VOCAB = b"MSEV"
 _MAGIC_RERANK = b"MSRV"
 _MAGIC_RELATIONS = b"MSRL"
 _MAGIC_BM25 = b"MSBM"
+_MAGIC_ATLAS = b"MSAT"
 _VERSION_MAJOR = 1
 _VMIN_DOCS = 0
 _VMIN_RELATIONS = 0
@@ -29,6 +30,7 @@ _VMIN_RELATIONS = 0
 _VMIN_VOCAB = 1
 _VMIN_RERANK = 0
 _VMIN_BM25 = 0
+_VMIN_ATLAS = 0
 
 
 def _write(
@@ -127,6 +129,35 @@ def load_docs(
     norms = np.frombuffer(raw, dtype=np.float32, count=n)
     mat = np.frombuffer(raw, dtype=np.int8, offset=4 * n).reshape(n, dim).copy()
     return mat, norms.copy(), list(meta["ids"]), grid
+
+
+def save_atlas(path: Path, positions: np.ndarray, cote: int) -> None:
+    """atlas.msat (canal atlas, #367) : cellule de chaque token, int32 ALIGNÉ sur
+    l'ordre du vocab (`profiles.rows`, le même ordre que vocab.msev) — aucune liste de
+    tokens dupliquée. Le tuple grille du header porte (cote, cote, 1)."""
+    _write(
+        path / "atlas.msat",
+        _MAGIC_ATLAS,
+        (cote, cote, 1),
+        len(positions),
+        {},
+        [positions.astype(np.int32)],
+        vmin=_VMIN_ATLAS,
+    )
+
+
+def load_atlas(path: Path) -> tuple[np.ndarray, int] | None:
+    """None si atlas.msat absent (index construit sans --atlas, dégradation propre).
+    ValueError si présent mais corrompu — même contrat que load_bm25."""
+    file = path / "atlas.msat"
+    if not file.is_file():
+        return None
+    (cote, _c2, _un), n, _meta, vmin, raw = _read(file, _MAGIC_ATLAS)
+    if vmin != _VMIN_ATLAS:
+        raise ValueError(f"{file.name} : version mineure non supportée (vmin={vmin})")
+    if len(raw) < 4 * n:
+        raise ValueError(f"fichier {file.name} tronqué ou corrompu")
+    return np.frombuffer(raw, dtype=np.int32, count=n).copy(), int(cote)
 
 
 def save_rerank(path: Path, mat: np.ndarray, model: str) -> None:

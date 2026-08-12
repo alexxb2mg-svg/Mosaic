@@ -10,11 +10,12 @@ from mosaic import facettes as facettes_module
 from mosaic import profil as profil_module
 from mosaic.bm25 import Bm25
 from mosaic import typage as typage_module
+from mosaic import atlas as atlas_module
 from mosaic.typage import GrilleTypee
 from mosaic.collocations import detect, merge
 from mosaic.docio import _EXTS, _path_tokens, _read_text, _read_text_convertible
 from mosaic.embeddings import Embeddings
-from mosaic.encoder import WEIGHTS_DEFAULT, encode
+from mosaic.encoder import WEIGHTS_DEFAULT, encode, quantize
 from mosaic.lexicon import canonicalize, compile_lexicon, load_lexicon
 from mosaic.profiles import Profiles
 from mosaic.relations import (
@@ -24,11 +25,13 @@ from mosaic.relations import (
 )
 from mosaic.smoothing import smooth
 from mosaic.store import (
+    load_atlas,
     load_bm25,
     load_docs,
     load_relations,
     load_rerank,
     load_vocab,
+    save_atlas,
     save_bm25,
     save_docs,
     save_relations,
@@ -105,6 +108,9 @@ class Index:
         profil: dict | None = None,
         bm25: Bm25 | None = None,
         grilles: dict[str, GrilleTypee] | None = None,
+        atlas_positions: np.ndarray | None = None,
+        atlas_mat: np.ndarray | None = None,
+        atlas_norms: np.ndarray | None = None,
     ) -> None:
         self.index_dir = index_dir
         self.profiles = profiles
@@ -153,6 +159,12 @@ class Index:
         # (ref/chemin/custom) — la grille « sens » est la grille principale
         # (mat/profiles ci-dessus). search() route et synthétise (queries.search_typee).
         self.grilles: dict[str, GrilleTypee] | None = grilles
+        # Canal atlas (#367, opt-in --atlas) : cellule de chaque token du vocab
+        # (positions, ordre profiles.rows) + cartes de chaleur documents int8 alignées
+        # sur `ids`. None = index sans atlas.msat — la fusion reste à trois canaux.
+        self.atlas_positions: np.ndarray | None = atlas_positions
+        self.atlas_mat: np.ndarray | None = atlas_mat
+        self.atlas_norms: np.ndarray | None = atlas_norms
         # Cache float32 OPTIONNEL de la matrice documents (chemin chaud). Le produit
         # int8 @ float upcaste toute la matrice À CHAQUE requête (mesuré : 577 ms sur
         # 18k docs contre 51 ms pré-converti — 11x). Trade-off explicite RAM vs latence :
@@ -197,10 +209,24 @@ class Index:
         profil: dict | None = None,
         hybride: bool = False,
         grilles_typees: bool = False,
+        atlas: bool = False,
     ) -> "Index":
         corpus_dir, index_dir = Path(corpus_dir), Path(index_dir)
         if not corpus_dir.is_dir():
             raise ValueError(f"corpus introuvable : {corpus_dir}")
+        if atlas and not hybride:
+            # Le canal atlas n'est validé qu'en QUATUOR (grille+BM25+embeddings+atlas,
+            # +2,84 pts R@10 plein corpus, #367) — jamais un sous-ensemble silencieux,
+            # même règle que le refus du duo par la fusion.
+            raise ValueError(
+                "--atlas exige --hybride : le canal atlas n'est validé qu'en quatuor "
+                "de fusion (grille + BM25 + embeddings + atlas)"
+            )
+        if atlas and grilles_typees:
+            raise ValueError(
+                "--atlas et --grilles-typees ne sont pas composés (v1) : le flux typé "
+                "fragmenterait la carte — à mesurer avant de coder"
+            )
         if hybride:
             # Un index hybride = les TROIS canaux de la fusion (grille + BM25 + embeddings) :
             # le trio est ce que la mesure a validé, le duo grille+BM25 a été mesuré nuisible
@@ -343,6 +369,21 @@ class Index:
             )
         else:
             bm25 = Bm25.from_docs(docs) if hybride else None
+        # Canal atlas (#367) : SOM déterministe sur les profils du vocabulaire ->
+        # cellule par token, puis carte de chaleur tf×idf par document (même flux de
+        # tokens que la grille et BM25), quantifiée int8 comme les grilles.
+        atlas_positions = atlas_mat = atlas_norms = None
+        if atlas:
+            atlas_positions = atlas_module.construire_mapping(profiles)
+            atlas_mat = np.zeros(
+                (len(docs), atlas_module.COTE * atlas_module.COTE), dtype=np.int8
+            )
+            atlas_norms = np.zeros(len(docs), dtype=np.float32)
+            for row, (_doc_id, toks) in enumerate(docs):
+                m = atlas_module.carte(
+                    toks, profiles.rows, atlas_positions, profiles.idf
+                )
+                atlas_mat[row], atlas_norms[row] = quantize(m)
         # Grilles typées EXTRA (ref/chemin/custom) — la grille sens est déjà la
         # principale. Chaque grille : sa dimension (taillée au vocab), ses poids, son
         # lissage (JAMAIS sur des identifiants), ses embeddings (spec v4 §1-4).
@@ -401,6 +442,9 @@ class Index:
             profil=profil,
             bm25=bm25,
             grilles=grilles,
+            atlas_positions=atlas_positions,
+            atlas_mat=atlas_mat,
+            atlas_norms=atlas_norms,
         )
         if relations:
             idx._build_relations()
@@ -509,6 +553,18 @@ class Index:
                 "bm25.msbm incohérent avec l'index (nombre de documents différent) — "
                 "reconstruire avec `mosaic build --hybride`"
             )
+        atlas_positions = atlas_mat = atlas_norms = None
+        atlas_charge = load_atlas(index_dir)
+        if atlas_charge is not None:
+            atlas_positions, _cote = atlas_charge
+            atlas_mat, atlas_norms, ids_atlas, _grid_a = load_docs(
+                index_dir, suffixe="_atlas"
+            )
+            if ids_atlas != ids:
+                raise ValueError(
+                    "docs_atlas.msei incohérent avec l'index (documents différents) — "
+                    "reconstruire avec `mosaic build --hybride --atlas`"
+                )
         grilles: dict[str, GrilleTypee] | None = None
         gt_meta = meta.get("grilles_typees")
         if gt_meta:
@@ -555,6 +611,9 @@ class Index:
             profil=meta.get("profil"),
             bm25=bm25,
             grilles=grilles,
+            atlas_positions=atlas_positions,
+            atlas_mat=atlas_mat,
+            atlas_norms=atlas_norms,
         )
 
     def _save(self) -> None:
@@ -588,6 +647,19 @@ class Index:
             save_rerank(self.index_dir, self.rerank_vecs, self.rerank_model)
         if self.bm25 is not None:
             save_bm25(self.index_dir, self.bm25)
+        if self.atlas_positions is not None:
+            assert (
+                self.atlas_mat is not None and self.atlas_norms is not None
+            )  # invariant : jamais de mapping sans cartes
+            save_atlas(self.index_dir, self.atlas_positions, atlas_module.COTE)
+            save_docs(
+                self.index_dir,
+                self.atlas_mat,
+                self.atlas_norms,
+                self.ids,
+                (atlas_module.COTE, atlas_module.COTE, 1),
+                suffixe="_atlas",
+            )
         if self.grilles is not None:
             # meta : la carte des grilles (sens = grille principale, dims EFFECTIVES) ;
             # fichiers : un couple docs_<t>.msei / vocab_<t>.msev par grille extra,
@@ -776,6 +848,17 @@ class Index:
                 else [t for typ in sorted(flux_add) for t in flux_add[typ]]
             )
             self.bm25.add_doc(complet)
+        if self.atlas_positions is not None:
+            # Carte du nouveau document via le mapping FIGÉ au build : la SOM n'est pas
+            # incrémentale, les tokens inconnus du build ne contribuent pas (dérive
+            # observable via stats(), re-placée au rebuild nightly — spec §add).
+            assert self.atlas_mat is not None and self.atlas_norms is not None
+            m = atlas_module.carte(
+                tokens, self.profiles.rows, self.atlas_positions, self.profiles.idf
+            )
+            q_a, n_a = quantize(m)
+            self.atlas_mat = np.vstack([self.atlas_mat, q_a[None, :]])
+            self.atlas_norms = np.append(self.atlas_norms, np.float32(n_a))
         if self.relations_mat is not None:
             # add() n'a pas de notion de corpus_dir (cf. commentaire index_paths plus haut) :
             # entities_from_path(file.name) n'a donc jamais de segment de dossier -> canal
@@ -950,6 +1033,12 @@ class Index:
             self.bm25 is not None
         ):  # index hybride : la fusion trois canaux est disponible
             s["hybride"] = True
+        if self.atlas_positions is not None:  # canal atlas (#367)
+            s["atlas"] = {
+                "cote": atlas_module.COTE,
+                "tokens_mappes": int(len(self.atlas_positions)),
+                "cellules_occupees": int(len(np.unique(self.atlas_positions))),
+            }
         if self.grilles is not None:  # v4 : dims EFFECTIVES par grille (auto visibles)
             s["grilles_typees"] = {
                 "sens": int(self.mat.shape[1]),

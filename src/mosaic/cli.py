@@ -189,6 +189,15 @@ def main(argv: list[str] | None = None) -> int:
         "pour le standard BM25+embeddings)",
     )
     p_build.add_argument(
+        "--atlas",
+        action="store_true",
+        help="canal atlas (#367, exige --hybride) : SOM sémantique sur les profils du "
+        "vocabulaire, cartes de chaleur par document — 4e canal de `search --fusion`. "
+        "Mesuré : +2.84 pts R@10 et +3.65 MRR sur Alloprof complet au-dessus du trio. "
+        "Coût AU BUILD : la SOM travaille sur tout le vocabulaire (~4 Go de pic RAM et "
+        "~20 min à 72k tokens) — jamais un défaut",
+    )
+    p_build.add_argument(
         "--no-path-tokens",
         action="store_true",
         help="désactive l'injection des tokens du chemin relatif en tête du document "
@@ -571,6 +580,7 @@ def main(argv: list[str] | None = None) -> int:
                 doc_weight=doc_weight,
                 rerank_vectors=args.rerank_vectors,
                 hybride=args.hybride,
+                atlas=args.atlas,
                 grilles_typees=args.grilles_typees,
                 index_paths=not args.no_path_tokens,
                 ocr=args.ocr,

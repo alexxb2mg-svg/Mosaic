@@ -20,6 +20,7 @@ from mosaic.lexicon import canonicalize
 from mosaic import ingest
 from mosaic.meta import K_RRF_DEFAULT
 from mosaic import typage as typage_module
+from mosaic import atlas as atlas_module
 from mosaic.relations import bind, entites_du_canal, normalize_entity
 from mosaic.tokenize import tokenize
 
@@ -236,7 +237,13 @@ def search_fusion(idx: "Index", text: str, k: int = 10) -> list[dict]:
     1/(K+rang). Un canal SANS signal sur cette requête (tous scores nuls : requête hors
     vocabulaire pour BM25, annulée pour la grille) est écarté de la somme — pas de bruit
     de rang injecté par un canal aveugle. Déterministe : égalités départagées par ordre
-    de document (argsort stable). `rangs` expose le rang 1-based par canal (explicabilité)."""
+    de document (argsort stable). `rangs` expose le rang 1-based par canal (explicabilité).
+
+    QUATRIÈME canal quand l'index porte un atlas (build --hybride --atlas, #367) : la
+    carte de chaleur de la requête sur l'atlas sémantique, cosinus contre les cartes
+    documents — mesuré +2,84 pts R@10 et +3,65 MRR sur Alloprof COMPLET au-dessus du
+    trio (les erreurs de la carte SOM sont décorrélées de celles de la grille plate).
+    Même règle d'écartement sans signal (requête sans token mappé)."""
     if idx.bm25 is None:
         raise ValueError(
             "index sans bm25.msbm : reconstruire avec `mosaic build --hybride` "
@@ -267,6 +274,23 @@ def search_fusion(idx: "Index", text: str, k: int = 10) -> list[dict]:
     emb = idx.rerank_vecs @ rerank_module.encode_query(text)
     if np.any(emb):
         canaux.append(("embed", emb))
+    if (
+        idx.atlas_positions is not None
+        and idx.atlas_mat is not None
+        and idx.atlas_norms is not None
+    ):
+        carte_q = atlas_module.carte(
+            tokens, idx.profiles.rows, idx.atlas_positions, idx.profiles.idf
+        )
+        nq = float(np.linalg.norm(carte_q))
+        if nq > 0.0:
+            denom = idx.atlas_norms * np.float32(nq)
+            denom = np.where(denom == 0, np.float32(1.0), denom)
+            cos_a = (idx.atlas_mat.astype(np.float32) @ carte_q).astype(
+                np.float32
+            ) / denom
+            if np.any(cos_a):
+                canaux.append(("atlas", cos_a))
     if not canaux:
         return []
     rrf = np.zeros(n, dtype=np.float64)

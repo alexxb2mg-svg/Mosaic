@@ -97,12 +97,27 @@ def _projeter(mat: np.ndarray, k: int, graine: int = GRAINE) -> np.ndarray:
     — une SVD pleine sur V×12288 demanderait ~4 Go de matrices de travail à 40k tokens.
     Déterministe (graine fixe) ; sur-échantillonnage 2k pour la précision du sous-espace."""
     rng = np.random.default_rng(graine)
-    m32 = mat.astype(np.float32)
-    omega = rng.standard_normal((m32.shape[1], min(2 * k, m32.shape[1]))).astype(
+    omega = rng.standard_normal((mat.shape[1], min(2 * k, mat.shape[1]))).astype(
         np.float32
     )
-    q, _r = np.linalg.qr(m32 @ omega)  # base orthonormée du sous-espace dominant
-    b = q.T @ m32  # (2k, dim) — petit
+    if len(mat) <= 30_000:
+        m32 = mat.astype(np.float32)
+        q, _r = np.linalg.qr(m32 @ omega)
+        b = q.T @ m32  # (2k, dim) — petit
+    else:
+        # Gros vocabulaire (corpus plein) : la copie float32 intégrale doublerait le
+        # pic mémoire (~3,5 Go de plus à 72k tokens). Les deux produits se calculent
+        # par TRANCHES de lignes — même résultat mathématique, pic divisé par ~2.
+        # (Chemin distinct : les sommes flottantes par blocs peuvent différer du
+        # chemin plein sur des décimales inertes — déterministe À CHEMIN CONSTANT.)
+        tranche = 8192
+        y = np.empty((len(mat), omega.shape[1]), dtype=np.float32)
+        for i in range(0, len(mat), tranche):
+            y[i : i + tranche] = mat[i : i + tranche].astype(np.float32) @ omega
+        q, _r = np.linalg.qr(y)
+        b = np.zeros((q.shape[1], mat.shape[1]), dtype=np.float32)
+        for i in range(0, len(mat), tranche):
+            b += q[i : i + tranche].T @ mat[i : i + tranche].astype(np.float32)
     ub, s, _vt = np.linalg.svd(b, full_matrices=False)
     return ((q @ ub[:, :k]) * s[:k]).astype(np.float32)
 
@@ -123,14 +138,39 @@ def _som(features: np.ndarray, graine: int = GRAINE) -> np.ndarray:
     yy, xx = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
     coords = np.stack([yy.ravel(), xx.ravel()], axis=1).astype(np.float64)  # (C, 2)
     d2_cellules = ((coords[:, None, :] - coords[None, :, :]) ** 2).sum(-1)  # (C, C)
+    tranche = 8192  # gros vocabulaire : (T, C) float64 pèserait ~2,4 Go à 72k tokens
     for it in range(ITERATIONS):
         sigma = SIGMA_DEBUT * (SIGMA_FIN / SIGMA_DEBUT) ** (it / max(1, ITERATIONS - 1))
-        bmu = np.argmax(feats @ _normaliser(protos).T, axis=1)
-        voisinage = np.exp(-d2_cellules[bmu] / (2.0 * sigma * sigma))  # (T, C)
-        masse = voisinage.sum(axis=0)  # (C,)
-        masse[masse == 0] = 1.0
-        protos = (voisinage.T @ feats) / masse[:, None]
-    return np.argmax(feats @ _normaliser(protos).T, axis=1)
+        nprot_t = _normaliser(protos).T
+        if len(feats) <= 30_000:
+            bmu = np.argmax(feats @ nprot_t, axis=1)
+            voisinage = np.exp(-d2_cellules[bmu] / (2.0 * sigma * sigma))  # (T, C)
+            masse = voisinage.sum(axis=0)  # (C,)
+            masse[masse == 0] = 1.0
+            protos = (voisinage.T @ feats) / masse[:, None]
+        else:
+            # Accumulation par TRANCHES : même mise à jour mathématique, pic borné à
+            # tranche×C par intermédiaire. (Chemin distinct des runs <=30k : sommes
+            # flottantes ordonnées autrement — déterministe À CHEMIN CONSTANT.)
+            masse = np.zeros(cellules, dtype=np.float64)
+            protos_acc = np.zeros_like(protos, dtype=np.float64)
+            for i in range(0, len(feats), tranche):
+                fchunk = feats[i : i + tranche]
+                bmu_c = np.argmax(fchunk @ nprot_t, axis=1)
+                vois = np.exp(-d2_cellules[bmu_c] / (2.0 * sigma * sigma))
+                masse += vois.sum(axis=0)
+                protos_acc += vois.T @ fchunk
+            masse[masse == 0] = 1.0
+            protos = (protos_acc / masse[:, None]).astype(feats.dtype)
+    if len(feats) <= 30_000:
+        return np.argmax(feats @ _normaliser(protos).T, axis=1)
+    nprot_t = _normaliser(protos).T
+    return np.concatenate(
+        [
+            np.argmax(feats[i : i + tranche] @ nprot_t, axis=1)
+            for i in range(0, len(feats), tranche)
+        ]
+    )
 
 
 def _noyau_gaussien(sigma: float) -> np.ndarray:
