@@ -11,6 +11,7 @@ from mosaic import profil as profil_module
 from mosaic.bm25 import Bm25
 from mosaic import typage as typage_module
 from mosaic import atlas as atlas_module
+from mosaic import grammaire as grammaire_module
 from mosaic.typage import GrilleTypee
 from mosaic.collocations import detect, merge
 from mosaic.docio import _EXTS, _path_tokens, _read_text, _read_text_convertible
@@ -111,6 +112,8 @@ class Index:
         atlas_positions: np.ndarray | None = None,
         atlas_mat: np.ndarray | None = None,
         atlas_norms: np.ndarray | None = None,
+        gram_mat: np.ndarray | None = None,
+        gram_norms: np.ndarray | None = None,
     ) -> None:
         self.index_dir = index_dir
         self.profiles = profiles
@@ -165,6 +168,11 @@ class Index:
         self.atlas_positions: np.ndarray | None = atlas_positions
         self.atlas_mat: np.ndarray | None = atlas_mat
         self.atlas_norms: np.ndarray | None = atlas_norms
+        # Canal grammatical (opt-in --grammatical) : traces de rôles liées par
+        # bind/np.roll, vecteur SÉPARÉ par document — None = index sans canal
+        # (comportement bit-identique). Cf. mosaic.grammaire.
+        self.gram_mat: np.ndarray | None = gram_mat
+        self.gram_norms: np.ndarray | None = gram_norms
         # Cache float32 OPTIONNEL de la matrice documents (chemin chaud). Le produit
         # int8 @ float upcaste toute la matrice À CHAQUE requête (mesuré : 577 ms sur
         # 18k docs contre 51 ms pré-converti — 11x). Trade-off explicite RAM vs latence :
@@ -210,6 +218,7 @@ class Index:
         hybride: bool = False,
         grilles_typees: bool = False,
         atlas: bool = False,
+        grammatical: bool = False,
     ) -> "Index":
         corpus_dir, index_dir = Path(corpus_dir), Path(index_dir)
         if not corpus_dir.is_dir():
@@ -271,6 +280,11 @@ class Index:
             list[str]
         ] = []  # grilles typées : le chemin est un FLUX à part
         rerank_texts: list[str] = []
+        # Canal grammatical (opt-in) : les rôles s'analysent sur le TEXTE BRUT (ordre
+        # des mots + ponctuation), jamais sur le flux canonicalisé — calcul DANS la
+        # boucle de lecture, le texte n'est pas conservé.
+        gram_rows: list[tuple[np.ndarray, float]] = []
+        dim_grille = grid[0] * grid[1] * grid[2]
         facettes: dict[str, dict[str, str]] = {}
         ignores = 0
         for p in files:
@@ -300,6 +314,8 @@ class Index:
             raw.append((doc_id, tokens))
             if rerank_vectors:
                 rerank_texts.append(text)
+            if grammatical:
+                gram_rows.append(grammaire_module.canal_document(text, dim_grille))
         if lexicon is None:
             lexicon = load_lexicon()
         compiled = compile_lexicon(lexicon)
@@ -375,6 +391,14 @@ class Index:
         # Canal atlas (#367) : SOM déterministe sur les profils du vocabulaire ->
         # cellule par token, puis carte de chaleur tf×idf par document (même flux de
         # tokens que la grille et BM25), quantifiée int8 comme les grilles.
+        gram_mat = gram_norms = None
+        if grammatical:
+            gram_mat = (
+                np.stack([v for v, _n in gram_rows]).astype(np.int8)
+                if gram_rows
+                else np.zeros((0, dim_grille), dtype=np.int8)
+            )
+            gram_norms = np.array([n for _v, n in gram_rows], dtype=np.float32)
         atlas_positions = atlas_mat = atlas_norms = None
         if atlas:
             atlas_positions = atlas_module.construire_mapping(profiles)
@@ -448,6 +472,8 @@ class Index:
             atlas_positions=atlas_positions,
             atlas_mat=atlas_mat,
             atlas_norms=atlas_norms,
+            gram_mat=gram_mat,
+            gram_norms=gram_norms,
         )
         if relations:
             idx._build_relations()
@@ -556,6 +582,16 @@ class Index:
                 "bm25.msbm incohérent avec l'index (nombre de documents différent) — "
                 "reconstruire avec `mosaic build --hybride`"
             )
+        gram_mat = gram_norms = None
+        if (index_dir / "docs_grammatical.msei").is_file():
+            gram_mat, gram_norms, ids_gram, _grid_g = load_docs(
+                index_dir, suffixe="_grammatical"
+            )
+            if ids_gram != ids:
+                raise ValueError(
+                    "docs_grammatical.msei incohérent avec l'index (documents "
+                    "différents) — reconstruire avec `mosaic build --grammatical`"
+                )
         atlas_positions = atlas_mat = atlas_norms = None
         atlas_charge = load_atlas(index_dir)
         if atlas_charge is not None:
@@ -617,6 +653,8 @@ class Index:
             atlas_positions=atlas_positions,
             atlas_mat=atlas_mat,
             atlas_norms=atlas_norms,
+            gram_mat=gram_mat,
+            gram_norms=gram_norms,
         )
 
     def _save(self) -> None:
@@ -650,6 +688,16 @@ class Index:
             save_rerank(self.index_dir, self.rerank_vecs, self.rerank_model)
         if self.bm25 is not None:
             save_bm25(self.index_dir, self.bm25)
+        if self.gram_mat is not None:
+            assert self.gram_norms is not None
+            save_docs(
+                self.index_dir,
+                self.gram_mat,
+                self.gram_norms,
+                self.ids,
+                self.grid,
+                suffixe="_grammatical",
+            )
         if self.atlas_positions is not None:
             assert (
                 self.atlas_mat is not None and self.atlas_norms is not None
@@ -851,6 +899,14 @@ class Index:
                 else [t for typ in sorted(flux_add) for t in flux_add[typ]]
             )
             self.bm25.add_doc(complet)
+        if self.gram_mat is not None:
+            # Canal grammatical du nouveau document — analysé sur son TEXTE brut.
+            assert self.gram_norms is not None
+            v_g, n_g = grammaire_module.canal_document(
+                text, self.grid[0] * self.grid[1] * self.grid[2]
+            )
+            self.gram_mat = np.vstack([self.gram_mat, v_g[None, :]])
+            self.gram_norms = np.append(self.gram_norms, np.float32(n_g))
         if self.atlas_positions is not None:
             # Carte du nouveau document via le mapping FIGÉ au build : la SOM n'est pas
             # incrémentale, les tokens inconnus du build ne contribuent pas (dérive
@@ -891,6 +947,7 @@ class Index:
         type_filtre: str | None = None,
         recence: float = 0.0,
         fusion: bool = False,
+        grammatical: bool = False,
     ) -> list[dict]:
         """`fusion=True` : fusion RRF à trois canaux (grille + BM25 + embeddings), validée
         par la mesure — nécessite un index construit avec --hybride (cf. queries.search_fusion).
@@ -909,6 +966,18 @@ class Index:
                 "fusion et rerank sont exclusifs : la fusion intègre déjà le canal "
                 "embeddings comme canal plein"
             )
+        if grammatical:
+            if self.gram_mat is None:
+                raise ValueError(
+                    "index sans canal grammatical : reconstruire avec "
+                    "`mosaic build --grammatical` pour utiliser --grammatical"
+                )
+            if fusion or rerank or type_filtre or recence:
+                raise ValueError(
+                    "--grammatical est exclusif (v1) avec fusion/rerank/type/recence — "
+                    "le canal structural se mesure seul avant de se composer"
+                )
+            return queries.search_grammatical(self, text, k)
         refs_requete = (
             facettes_module.refs_du_texte(text, (self.profil or {}).get("refs"))
             if self.facettes
@@ -1036,6 +1105,11 @@ class Index:
             self.bm25 is not None
         ):  # index hybride : la fusion trois canaux est disponible
             s["hybride"] = True
+        if self.gram_mat is not None and self.gram_norms is not None:
+            s["grammatical"] = {
+                "docs_avec_roles": int((self.gram_norms > 0).sum()),
+                "docs": int(len(self.gram_norms)),
+            }
         if self.atlas_positions is not None:  # canal atlas (#367)
             s["atlas"] = {
                 "cote": atlas_module.COTE,

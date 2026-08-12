@@ -66,6 +66,12 @@ tunes the weights on *your* ground truth.
 - **Temporal truth** (`mosaic actuel`) — versions of the same aspect are grouped, the
   newest is canonical, older ones are flagged **stale**: an agent can no longer
   mistake outdated data for truth.
+- **Deterministic grammatical channel** (`--grammatical`) — rule-based French role
+  analysis (negation scope, upstream/downstream order, agent/patient) bound to token
+  signatures: separates clauses with *identical words and opposite meaning* that
+  bag-of-words provably confuses (25/34 planted pairs at cosine exactly 1.0 bare;
+  33/34 separated with the channel; 2.1% role error with clean abstention — silence
+  over guessing). Separate vector, zero impact unless asked.
 - **Semantic corpus diff** (`mosaic diff`) — what changed in *meaning* between two
   states of a corpus: vocabulary born and dead, words whose context drifted, usage
   declines, and untouched documents whose meaning moved because the world around them

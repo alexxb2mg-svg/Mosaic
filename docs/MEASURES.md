@@ -128,6 +128,19 @@ predictions declared before measurement):
 Shipped as `mosaic diff <t1> <t2>` (two corpus folders — ephemeral builds — or two
 index folders; mixed natures and mismatched encoding spaces are refused loudly).
 
+## Buried tracks (ratified)
+
+- **Pyramid prefilter** (atlas step 3): failed its pre-declared criterion, and the
+  permuted control revealed the mechanism — pooling-as-projection, not semantic
+  locality. `research/atlas_pyramide.py`.
+- **Deterministic postings expansion** (a "SPLADE without the network",
+  `research/expansion_postings.py`): real but marginal gains (+0.83 pt R@10 at best on
+  Alloprof, threshold declared at +2). The lesson outvalues the feature: the token
+  stream's canonicalization + collocations already close most of the vocabulary gap
+  that learned sparse expansion closes elsewhere. Also caught a bench trap: with path
+  tokens on, BM25 scored a perfect MRR on the paraphrase bench because file names name
+  the dishes — invalid control, fixed with `--no-path-tokens`.
+
 ## Reproduce
 
 ```bash

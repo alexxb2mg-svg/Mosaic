@@ -21,6 +21,7 @@ from mosaic import ingest
 from mosaic.meta import K_RRF_DEFAULT
 from mosaic import typage as typage_module
 from mosaic import atlas as atlas_module
+from mosaic import grammaire as grammaire_module
 from mosaic.relations import bind, entites_du_canal, normalize_entity
 from mosaic.tokenize import tokenize
 
@@ -224,6 +225,38 @@ def search_typee(
         for i in ordre[depth : depth + (k - len(results))]:
             results.append(_hit(i))
     return results
+
+
+def search_grammatical(idx: "Index", text: str, k: int = 10) -> list[dict]:
+    """Recherche avec le canal grammatical (opt-in --grammatical, brief 12/08) :
+    score = cos(grille) + 0.5·cos(canal structural) — le λ=0.5 est celui du banc P1
+    (33/34 paires à mots identiques/sens opposé séparées ; le moteur nu en confond
+    25/34 à cosinus 1.0000 exactement). La requête est analysée par les MÊMES règles
+    déterministes que les documents (mosaic.grammaire) ; une requête sans rôle donne
+    un canal nul — le classement retombe alors sur la grille seule, sans bruit.
+    `score_grammatical` expose la contribution structurale (explicabilité)."""
+    assert idx.gram_mat is not None and idx.gram_norms is not None
+    n = len(idx.ids)
+    if n == 0:
+        return []
+    cos = _cos_all(idx, text)
+    dim = idx.grid[0] * idx.grid[1] * idx.grid[2]
+    q_g, nq = grammaire_module.canal_document(text, dim)
+    cos_g = np.zeros(n, dtype=np.float32)
+    if nq > 0.0:
+        denom = idx.gram_norms * np.float32(nq)
+        denom = np.where(denom == 0, np.float32(1.0), denom)
+        cos_g = (idx.gram_mat.astype(np.float32) @ q_g.astype(np.float32)) / denom
+    combine = cos.astype(np.float64) + 0.5 * cos_g.astype(np.float64)
+    ordre = np.argsort(-combine, kind="stable")[:k]
+    return [
+        {
+            "id": idx.ids[i],
+            "score": round(float(combine[i]), 6),
+            "score_grammatical": round(float(cos_g[i]), 4),
+        }
+        for i in ordre
+    ]
 
 
 def search_fusion(idx: "Index", text: str, k: int = 10) -> list[dict]:

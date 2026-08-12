@@ -292,6 +292,16 @@ def _construire_parser() -> argparse.ArgumentParser:
         "~20 min à 72k tokens) — jamais un défaut",
     )
     p_build.add_argument(
+        "--grammatical",
+        action="store_true",
+        help="canal GRAMMATICAL déterministe (opt-in) : rôles à règles fermées "
+        "(négation à portée, amont/aval ordonné, agent/patient) analysés sur le texte "
+        "brut et liés aux signatures (bind du canal relations). Mesuré : 25/34 paires "
+        "à mots identiques/sens opposé sont invisibles au moteur nu (cos 1.0000) ; "
+        "33/34 séparées avec le canal ; analyseur à 2.1 %% d'erreur avec abstention "
+        "propre. Canal SÉPARÉ : sans le drapeau de recherche, impact nul",
+    )
+    p_build.add_argument(
         "--no-path-tokens",
         action="store_true",
         help="désactive l'injection des tokens du chemin relatif en tête du document "
@@ -375,6 +385,14 @@ def _construire_parser() -> argparse.ArgumentParser:
         "faisant plusieurs recherches : amortit le coût de démarrage). Pas de `query` "
         "positionnelle dans ce mode. Une requête en échec émet {'error', 'requete'} sur "
         "SA ligne et le flux continue (rc final 1 si au moins un échec).",
+    )
+    p_search.add_argument(
+        "--grammatical",
+        action="store_true",
+        help="active le canal grammatical à la recherche (nécessite un index construit "
+        "avec --grammatical) : score = grille + 0.5·structural — sépare les clauses à "
+        "mots identiques et sens opposé (amont/aval, négation à portée). Exclusif (v1) "
+        "avec --fusion/--rerank/--type/--recence/--connecteurs",
     )
     p_search.add_argument(
         "--connecteurs",
@@ -742,6 +760,7 @@ def _cmd_build(args) -> int:
         hybride=args.hybride,
         atlas=args.atlas,
         grilles_typees=args.grilles_typees,
+        grammatical=args.grammatical,
         index_paths=not args.no_path_tokens,
         ocr=args.ocr,
         relations=args.relations,
@@ -809,6 +828,8 @@ def _cmd_search(args) -> int:
         raise ValueError("--fusion est incompatible avec --connecteurs")
     if args.connecteurs and (args.type_filtre or args.recence):
         raise ValueError("--connecteurs est incompatible avec --type/--recence")
+    if args.grammatical and args.connecteurs:
+        raise ValueError("--grammatical est incompatible avec --connecteurs")
     if args.batch and args.query is not None:
         raise ValueError(
             "--batch : pas de `query` positionnelle, les requêtes viennent de "
@@ -830,6 +851,7 @@ def _cmd_search(args) -> int:
         type_filtre=args.type_filtre,
         recence=args.recence,
         fusion=args.fusion,
+        grammatical=args.grammatical,
     )
     if args.batch:
         echecs = 0
