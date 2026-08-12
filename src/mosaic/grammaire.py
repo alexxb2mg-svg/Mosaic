@@ -212,10 +212,78 @@ def _indices_verbes_nies(toks: list[str]) -> set[int]:
     return nies
 
 
+def _motif_negation_nominale(
+    toks: list[str], i: int, t: str, va: frozenset[str], emet
+) -> None:
+    """sans / aucun / aucune / ni — négation nominale à portée (max 4 tokens)."""
+    if t == "sans" and i + 1 < len(toks) and toks[i + 1] in IDIOMES_SANS:
+        return  # vis sans fin, sans suite… : idiome, abstention
+    for ent in _portee_negation(toks, i, va):
+        emet("absent", ent)
+
+
+def _motif_cadre_ne(toks: list[str], i: int, va: frozenset[str], emet) -> None:
+    """ne … pas/plus/jamais — remonte au verbe entre « ne » et la fermeture."""
+    verbe = None
+    for j in range(i - 1, -1, -1):
+        if toks[j] in ("ne", "n"):
+            break
+        if _est_plein(toks[j]) or toks[j] in COPULES:
+            verbe = toks[j]
+    if verbe in COPULES:
+        emet("absent", _argument_droit(toks, i))  # n'est pas conforme
+    elif verbe in EXISTENTIELS and i + 1 < len(toks) and toks[i + 1] in DE_NUS:
+        for ent in _portee_negation(toks, i + 1, va):
+            emet("absent", ent)  # ne dispose pas de bypass manuel
+    elif verbe is not None:
+        emet("absent", verbe)  # ne coupe pas … : l'action est niée
+
+
+def _motif_amont_aval(
+    toks: list[str], i: int, t: str, saut: frozenset[str], emet
+) -> None:
+    """« X en amont|aval de Y » — relation ORDONNÉE, jamais une demi-relation."""
+    if i + 1 >= len(toks) or toks[i + 1] not in (DE_NUS | DE_DEFINIS):
+        return
+    x = _argument_gauche(toks, i - 1, saut)
+    y = _argument_droit(toks, i + 1)
+    if x is None or y is None:
+        return  # jamais une demi-relation
+    if t == "amont":
+        emet("amont", x)
+        emet("aval", y)
+    else:
+        emet("aval", x)
+        emet("amont", y)
+
+
+def _motif_voix_active(toks: list[str], i: int, saut: frozenset[str], emet) -> None:
+    """X V Y — agent/patient (V dans la liste fermée, non nié : gardé par l'appelant)."""
+    x = _argument_gauche(toks, i, saut)
+    y = _argument_droit(toks, i)
+    if x is not None and y is not None:
+        emet("agent", x)
+        emet("patient", y)
+
+
+def _motif_voix_passive(toks: list[str], i: int, saut: frozenset[str], emet) -> None:
+    """X est PARTICIPE par Y — patient/agent (participe gardé par l'appelant)."""
+    if i + 1 < len(toks) and toks[i + 1] == "par":
+        x = _argument_gauche(toks, i - 1, saut)
+        y = _argument_droit(toks, i + 1)
+        if x is not None and y is not None:
+            emet("patient", x)
+            emet("agent", y)
+
+
 def analyse(clause: str, extension: Extension | None = None) -> list[tuple[str, str]]:
     """Rôles (role, entite) d'une clause — liste FERMÉE de motifs, abstention par
     défaut. `extension` (clé « grammaire » d'un profil d'index) élargit les seules
-    listes ouvertes au métier."""
+    listes ouvertes au métier.
+
+    La boucle est un DISPATCH plat : une garde par famille de motifs, le corps de
+    chaque famille vit dans son `_motif_*` (un helper = une règle testable seule ;
+    découpage 12/08, déplacements purs — le banc des 34 paires fait foi)."""
     va, pp, saut = VERBES_ACTIFS, PARTICIPES_PASSIFS, SAUT_GAUCHE
     if extension is not None:
         va = va | extension.verbes_actifs
@@ -233,71 +301,18 @@ def analyse(clause: str, extension: Extension | None = None) -> list[tuple[str, 
     nies = _indices_verbes_nies(toks)
 
     for i, t in enumerate(toks):
-        # ---- négation nominale : sans / aucun / aucune / ni --------------------
         if t in NEGATEURS_NOMINAUX:
-            if t == "sans" and i + 1 < len(toks) and toks[i + 1] in IDIOMES_SANS:
-                continue  # vis sans fin, sans suite… : idiome, abstention
-            for ent in _portee_negation(toks, i, va):
-                emet("absent", ent)
-            continue
-
-        # ---- non + token plein -------------------------------------------------
-        if t == "non":
+            _motif_negation_nominale(toks, i, t, va, emet)
+        elif t == "non":
             emet("absent", _argument_droit(toks, i))
-            continue
-
-        # ---- cadre verbal ne … pas/plus/jamais ---------------------------------
-        if t in FERMETURES_NE and i in nies:
-            # remonte au verbe entre ne et la fermeture
-            verbe = None
-            for j in range(i - 1, -1, -1):
-                if toks[j] in ("ne", "n"):
-                    break
-                if _est_plein(toks[j]) or toks[j] in COPULES:
-                    verbe = toks[j]
-            if verbe in COPULES:
-                emet("absent", _argument_droit(toks, i))  # n'est pas conforme
-            elif verbe in EXISTENTIELS and i + 1 < len(toks) and toks[i + 1] in DE_NUS:
-                for ent in _portee_negation(toks, i + 1, va):
-                    emet("absent", ent)  # ne dispose pas de bypass manuel
-            elif verbe is not None:
-                emet("absent", verbe)  # ne coupe pas … : l'action est niée
-            continue
-
-        # ---- amont / aval : « en amont|aval de … » -----------------------------
-        if t in ("amont", "aval") and i > 0 and toks[i - 1] == "en":
-            if i + 1 >= len(toks) or toks[i + 1] not in (DE_NUS | DE_DEFINIS):
-                continue
-            x = _argument_gauche(toks, i - 1, saut)
-            y = _argument_droit(toks, i + 1)
-            if x is None or y is None:
-                continue  # jamais une demi-relation
-            if t == "amont":
-                emet("amont", x)
-                emet("aval", y)
-            else:
-                emet("aval", x)
-                emet("amont", y)
-            continue
-
-        # ---- voix active : X V Y (V dans la liste fermée, non nié) -------------
-        if t in va and i not in nies:
-            x = _argument_gauche(toks, i, saut)
-            y = _argument_droit(toks, i)
-            if x is not None and y is not None:
-                emet("agent", x)
-                emet("patient", y)
-            continue
-
-        # ---- voix passive : X est PARTICIPE par Y ------------------------------
-        if t in pp and i > 0 and toks[i - 1] in COPULES:
-            if i + 1 < len(toks) and toks[i + 1] == "par":
-                x = _argument_gauche(toks, i - 1, saut)
-                y = _argument_droit(toks, i + 1)
-                if x is not None and y is not None:
-                    emet("patient", x)
-                    emet("agent", y)
-            continue
+        elif t in FERMETURES_NE and i in nies:
+            _motif_cadre_ne(toks, i, va, emet)
+        elif t in ("amont", "aval") and i > 0 and toks[i - 1] == "en":
+            _motif_amont_aval(toks, i, t, saut, emet)
+        elif t in va and i not in nies:
+            _motif_voix_active(toks, i, saut, emet)
+        elif t in pp and i > 0 and toks[i - 1] in COPULES:
+            _motif_voix_passive(toks, i, saut, emet)
 
     return rel
 

@@ -210,6 +210,7 @@ class Index:
         atlas: bool,
         hybride: bool,
         grilles_typees: bool,
+        grammatical: bool,
         rerank_vectors: bool,
         profil: dict | None,
         embeddings: Embeddings | None,
@@ -240,6 +241,16 @@ class Index:
             raise ValueError(
                 "--atlas et --grilles-typees ne sont pas composés (v1) : le flux typé "
                 "fragmenterait la carte — à mesurer avant de coder"
+            )
+        if grammatical and grilles_typees:
+            # Découvert par l'A/B du 12/08 : la combinaison construisait un index
+            # INOUVRABLE (canal grammatical stocké en dimension d'origine, en-tête
+            # écrit avec la grille typée redimensionnée — reshape impossible à
+            # l'ouverture). Refus net plutôt qu'un artefact corrompu silencieux.
+            raise ValueError(
+                "--grammatical et --grilles-typees ne sont pas composés (v1) : "
+                "l'index produit serait inouvrable (géométries divergentes) — "
+                "à composer et mesurer avant d'autoriser"
             )
         if hybride:
             # Un index hybride = les TROIS canaux de la fusion (grille + BM25 + embeddings) :
@@ -550,6 +561,7 @@ class Index:
             atlas,
             hybride,
             grilles_typees,
+            grammatical,
             rerank_vectors,
             profil,
             embeddings,
@@ -958,7 +970,9 @@ class Index:
 
     # -- opérations ---------------------------------------------------------
 
-    def add(self, file: Path, ingest_cache_dir: Path | None = None) -> None:
+    def _add_valider(self) -> None:
+        """Phase 1 de add() — refus forts AVANT toute mutation de self : un échec
+        ici laisse l'index bit-identique à avant l'appel (jamais d'état partiel)."""
         if self.legacy:
             raise ValueError(
                 "index legacy v1.0 (sans comptages épars) : add() refusé — "
@@ -967,32 +981,24 @@ class Index:
         # Revue finale v1.5 (important, reproduit) : Embeddings.load(..., verify=False) ne
         # calcule jamais de sha (.sha == ""). Un add() ici écrirait embed_sha="" via _save(),
         # rendant l'index inouvrable en mode vérifié (défaut) à la prochaine Index.open().
-        # Refus net AVANT toute mutation de self, comme les autres garde-fous de add().
         if self.embeddings is not None and not self.embeddings.verified:
             raise ValueError(
                 "index ouvert sans vérification des embeddings : rouvrir en mode vérifié "
                 "avant add()"
             )
-        file = Path(file)
-        # rerank.msrv présent -> le nouveau document doit être encodé lui aussi. Vérifié
-        # AVANT toute mutation de self (mat/norms/ids/profiles) : un échec ici laisse
-        # l'index inchangé plutôt qu'à moitié mis à jour (fail-fast, jamais d'état partiel).
+        # rerank.msrv présent -> le nouveau document doit être encodé lui aussi.
         if self.rerank_vecs is not None and not rerank_module.available():
             raise ValueError(
                 "model2vec non installé — impossible de mettre à jour rerank.msrv "
                 '(pip install "model2vec==0.8.2")'
             )
-        if (
-            file.suffix.lower() in ingest.CONVERTIBLE_EXTS
-            or file.suffix.lower() in ingest.IMAGE_EXTS
-        ):
-            text = _read_text_convertible(file, ingest_cache_dir, ocr=self.ocr)
-            if text is None:
-                self.ignores += 1
-                self._save()
-                return
-        else:
-            text = _read_text(file)
+
+    def _add_flux(
+        self, file: Path, text: str
+    ) -> tuple[list[str], dict[str, list[str]] | None]:
+        """Phase 2 — du texte aux flux de tokens : chemin (file.name seulement —
+        jamais le chemin absolu de l'appelant, revue v1.5), canonicalisation,
+        collocations, routage typé si l'index l'est."""
         raw_tokens = tokenize(text)
         # Revue finale v1.5 (critique, reproduit) : tokeniser file.as_posix() (le chemin
         # TEL QUE PASSÉ par l'appelant, souvent absolu) injectait les répertoires parents
@@ -1018,6 +1024,101 @@ class Index:
                 (self.profil or {}).get("refs"),
             )
             tokens = flux_add["sens"]
+        return tokens, flux_add
+
+    def _add_grilles(self, flux_add: dict[str, list[str]]) -> None:
+        """Phase 4a — maintient chaque grille typée (learn/finalize/lissage/encode)."""
+        for t, g in self.grilles.items():
+            toks_t = flux_add.get(t, [])
+            g.profiles.learn(toks_t)
+            # finalize INCONDITIONNEL — deux raisons architecturales : (1) rows
+            # peut être vide alors que la grille sert (réfs sans paires de
+            # cooccurrence : la signature porte tout) ; (2) c'est finalize qui
+            # réalloue acc et COUPE le memmap du chargement paresseux — le sauter
+            # laisse un handle Windows ouvert et _save() échoue (mesuré).
+            g.profiles.finalize(self.profile_weighting)
+            if g.profiles.rows:
+                _apply_smoothing(g.profiles, int(g.config.get("lissage") or 0))
+            emb_t = self.embeddings if g.config.get("embeddings") else None
+            poids_t = (
+                tuple(g.config["poids"]) if g.config.get("poids") else self.weights
+            )
+            q_t, n_t = encode(toks_t, g.profiles, embeddings=emb_t, weights=poids_t)
+            g.mat = np.vstack([g.mat, q_t[np.newaxis, :]])
+            g.norms = np.append(g.norms, np.float32(n_t))
+
+    def _add_bm25(
+        self, tokens: list[str], flux_add: dict[str, list[str]] | None
+    ) -> None:
+        """Phase 4b — même flux de tokens que les grilles (invariant du canal : les
+        deux voient le même monde, cf. build) — index typé : le flux COMPLET."""
+        complet = (
+            tokens
+            if flux_add is None
+            else [t for typ in sorted(flux_add) for t in flux_add[typ]]
+        )
+        self.bm25.add_doc(complet)
+
+    def _add_grammatical(self, text: str) -> None:
+        """Phase 4c — canal grammatical du nouveau document, analysé sur son TEXTE
+        brut (extension métier relue depuis le profil persisté)."""
+        assert self.gram_norms is not None
+        v_g, n_g = grammaire_module.canal_document(
+            text,
+            self.grid[0] * self.grid[1] * self.grid[2],
+            grammaire_module.extension_depuis_profil(self.profil),
+        )
+        self.gram_mat = np.vstack([self.gram_mat, v_g[None, :]])
+        self.gram_norms = np.append(self.gram_norms, np.float32(n_g))
+
+    def _add_atlas(self, tokens: list[str]) -> None:
+        """Phase 4d — carte du nouveau document via le mapping FIGÉ au build : la
+        SOM n'est pas incrémentale, les tokens inconnus du build ne contribuent
+        pas (dérive observable via stats(), re-placée au rebuild nightly)."""
+        assert self.atlas_mat is not None and self.atlas_norms is not None
+        m = atlas_module.carte(
+            tokens, self.profiles.rows, self.atlas_positions, self.profiles.idf
+        )
+        q_a, n_a = quantize(m)
+        self.atlas_mat = np.vstack([self.atlas_mat, q_a[None, :]])
+        self.atlas_norms = np.append(self.atlas_norms, np.float32(n_a))
+
+    def _add_relations(self, file: Path) -> None:
+        """Phase 4e — add() n'a pas de notion de corpus_dir : file.name n'a jamais
+        de segment de dossier -> canal vide (zéros), jamais d'erreur (spec
+        §Relations tirées du chemin)."""
+        regles = profil_module.roles_du_profil(self.profil)
+        rels = (
+            entities_from_path_profil(file.name, regles)
+            if regles is not None
+            else entities_from_path(file.name)
+        )
+        for role, entite in rels:
+            self.relations_manifest.setdefault(entite, set()).add(role)
+        assert self.relations_norms is not None  # apparié à relations_mat
+        rel_q, rel_norm = document_channel(rels, self.relations_mat.shape[1])
+        self.relations_mat = np.vstack([self.relations_mat, rel_q[np.newaxis, :]])
+        self.relations_norms = np.append(self.relations_norms, np.float32(rel_norm))
+
+    def add(self, file: Path, ingest_cache_dir: Path | None = None) -> None:
+        """Ajoute un document — orchestrateur plat, même contrat que build (invariant
+        testé : add ≡ rebuild). Ordre des mutations INCHANGÉ depuis la version
+        monolithique (découpage 12/08, déplacements purs) : tout ce qui peut
+        échouer est calculé AVANT la première mutation de self."""
+        self._add_valider()
+        file = Path(file)
+        if (
+            file.suffix.lower() in ingest.CONVERTIBLE_EXTS
+            or file.suffix.lower() in ingest.IMAGE_EXTS
+        ):
+            text = _read_text_convertible(file, ingest_cache_dir, ocr=self.ocr)
+            if text is None:
+                self.ignores += 1
+                self._save()
+                return
+        else:
+            text = _read_text(file)
+        tokens, flux_add = self._add_flux(file, text)
 
         # Encodage rerank calculé ICI, AVANT toute mutation de self (profiles/mat/norms/ids) :
         # available() ne garantit que l'import, pas qu'un encode() runtime réussisse (poids
@@ -1050,71 +1151,15 @@ class Index:
             self.rerank_vecs = np.vstack([self.rerank_vecs, new_rerank_vec])
         if self.grilles is not None:
             assert flux_add is not None  # posé plus haut dès que grilles l'est
-            for t, g in self.grilles.items():
-                toks_t = flux_add.get(t, [])
-                g.profiles.learn(toks_t)
-                # finalize INCONDITIONNEL — deux raisons architecturales : (1) rows
-                # peut être vide alors que la grille sert (réfs sans paires de
-                # cooccurrence : la signature porte tout) ; (2) c'est finalize qui
-                # réalloue acc et COUPE le memmap du chargement paresseux — le sauter
-                # laisse un handle Windows ouvert et _save() échoue (mesuré).
-                g.profiles.finalize(self.profile_weighting)
-                if g.profiles.rows:
-                    _apply_smoothing(g.profiles, int(g.config.get("lissage") or 0))
-                emb_t = self.embeddings if g.config.get("embeddings") else None
-                poids_t = (
-                    tuple(g.config["poids"]) if g.config.get("poids") else self.weights
-                )
-                q_t, n_t = encode(toks_t, g.profiles, embeddings=emb_t, weights=poids_t)
-                g.mat = np.vstack([g.mat, q_t[np.newaxis, :]])
-                g.norms = np.append(g.norms, np.float32(n_t))
+            self._add_grilles(flux_add)
         if self.bm25 is not None:
-            # même flux de tokens que les grilles (invariant du canal : les deux voient
-            # le même monde, cf. build) — index typé : le flux COMPLET, toutes grilles
-            complet = (
-                tokens
-                if flux_add is None
-                else [t for typ in sorted(flux_add) for t in flux_add[typ]]
-            )
-            self.bm25.add_doc(complet)
+            self._add_bm25(tokens, flux_add)
         if self.gram_mat is not None:
-            # Canal grammatical du nouveau document — analysé sur son TEXTE brut.
-            assert self.gram_norms is not None
-            v_g, n_g = grammaire_module.canal_document(
-                text,
-                self.grid[0] * self.grid[1] * self.grid[2],
-                grammaire_module.extension_depuis_profil(self.profil),
-            )
-            self.gram_mat = np.vstack([self.gram_mat, v_g[None, :]])
-            self.gram_norms = np.append(self.gram_norms, np.float32(n_g))
+            self._add_grammatical(text)
         if self.atlas_positions is not None:
-            # Carte du nouveau document via le mapping FIGÉ au build : la SOM n'est pas
-            # incrémentale, les tokens inconnus du build ne contribuent pas (dérive
-            # observable via stats(), re-placée au rebuild nightly — spec §add).
-            assert self.atlas_mat is not None and self.atlas_norms is not None
-            m = atlas_module.carte(
-                tokens, self.profiles.rows, self.atlas_positions, self.profiles.idf
-            )
-            q_a, n_a = quantize(m)
-            self.atlas_mat = np.vstack([self.atlas_mat, q_a[None, :]])
-            self.atlas_norms = np.append(self.atlas_norms, np.float32(n_a))
+            self._add_atlas(tokens)
         if self.relations_mat is not None:
-            # add() n'a pas de notion de corpus_dir (cf. commentaire index_paths plus haut) :
-            # entities_from_path(file.name) n'a donc jamais de segment de dossier -> canal
-            # vide (zéros), jamais d'erreur — comportement documenté (spec §Relations tirées
-            # du chemin, « un doc sans relation extractible -> canal vide »).
-            regles = profil_module.roles_du_profil(self.profil)
-            rels = (
-                entities_from_path_profil(file.name, regles)
-                if regles is not None
-                else entities_from_path(file.name)
-            )
-            for role, entite in rels:
-                self.relations_manifest.setdefault(entite, set()).add(role)
-            assert self.relations_norms is not None  # apparié à relations_mat
-            rel_q, rel_norm = document_channel(rels, self.relations_mat.shape[1])
-            self.relations_mat = np.vstack([self.relations_mat, rel_q[np.newaxis, :]])
-            self.relations_norms = np.append(self.relations_norms, np.float32(rel_norm))
+            self._add_relations(file)
         self._save()
 
     def search(

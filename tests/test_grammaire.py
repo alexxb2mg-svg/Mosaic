@@ -120,6 +120,20 @@ def test_profil_grammaire_validation_stricte():
         valider({"grammaire": {"saut_gauche": ["mis en place"]}})
 
 
+def test_refus_composition_grilles_typees(tmp_path):
+    """grammatical + grilles-typees : refus au build (v1) — la combinaison
+    produisait un index INOUVRABLE (canal grammatical en dimension d'origine,
+    en-tête à la grille typée redimensionnée ; découvert par l'A/B du 12/08)."""
+    with pytest.raises(ValueError, match="grilles-typees"):
+        Index.build(
+            _corpus(tmp_path),
+            tmp_path / "idx",
+            grid=GRID,
+            grammatical=True,
+            grilles_typees=True,
+        )
+
+
 def test_cli_gardes(tmp_path):
     corpus = _corpus(tmp_path)
     idx = tmp_path / "idx"
