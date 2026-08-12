@@ -128,6 +128,27 @@ predictions declared before measurement):
 Shipped as `mosaic diff <t1> <t2>` (two corpus folders — ephemeral builds — or two
 index folders; mixed natures and mismatched encoding spaces are refused loudly).
 
+## The small-bench trap — two graft decisions settled by the full-scale judge
+
+Two candidates looked excellent on the 12-query bundled bench and went to the
+2,316-query Alloprof judge before any graft. Both verdicts reversed or confirmed
+what the small bench could not see:
+
+- **Binary rerank quantization** (`research/rerank_binaire.py`): zero loss and 16×
+  compression on 12 queries → at scale, **−3.13 pts R@10 / −2.53 MRR**, with 100% of
+  top-10 lists modified. The compression is real (16.0× exactly, proven
+  Hamming ≡ ±1 dot product), the quality is not. No graft — at best a
+  memory-constrained opt-in someday. The 12-query bench was simply too small to see
+  the degradation.
+- **potion-retrieval-32M (English) vs potion-multilingual-128M**: the English model
+  "won" the French recipe bench on a single query flip → at scale it **loses by
+  2.93 pts R@10** on 2,316 French queries (BM25 witness identical in both runs; model
+  identity proven in index metadata). The multilingual 128M stays the default.
+
+The meta-lesson is the doctrine itself: never change a default on a 12-query bench —
+the judge runs before the graft, always. (Free datum from the same runs: the γ
+embeddings table is worth ~+4.7 pts R@10 in this configuration.)
+
 ## Buried tracks (ratified)
 
 - **Pyramid prefilter** (atlas step 3): failed its pre-declared criterion, and the
