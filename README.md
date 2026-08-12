@@ -152,6 +152,30 @@ What this benchmark taught us — kept here because it is the honest story:
 - **Determinism holds at scale.** Two independent builds returned identical metrics to the
   fourth decimal (0.3848 / 0.2593).
 
+## Which setup for which terrain (measured)
+
+There is no universal winner — every result below was measured both ways, defeats
+included. The same three-channel fusion that wins outright on Alloprof *loses* on a
+paraphrase-heavy private corpus: it gains +2.5 pts of recall but drops 4 pts of MRR and
+divides the semantic-trap MRR by three (0.153 solo vs 0.051 fused). A rank fusion
+averages its channels' opinions; on lexical terrain that averages toward the truth, on
+semantic terrain it dilutes exactly the wins the grid exists for. Pick by terrain:
+
+| Your corpus looks like | Measured best setup | Evidence |
+|---|---|---|
+| Prose documents, paraphrase-heavy queries (knowledge bases, notes, procedures) | default grid + embeddings + `--rerank` — **no fusion** | private real-corpus bench: solo beats every fusion on MRR-semantic ×3; bundled bench 11/12 top-1 |
+| Lexical Q&A — queries reuse the documents' own vocabulary (FAQ, homework, tickets) | three-channel fusion (`--hybride` + `--fusion`) | Alloprof 2,556 docs: 0.517 R@10 vs 0.498 standard hybrid, 0.482 best single |
+| Catalogs and records dense in identifiers (products, part numbers, case files) | `--grilles-typees` (+ `--rerank-vectors`) | product bench: drowned ref 0.90 vs 0.825, bare ref 0.9917 with rerank |
+| Folders that evolve over time, where stale versions are a trap | any of the above + `mosaic actuel` | temporal-truth bench (stale version ranked first by flat search, flagged by `actuel`) |
+| Code repositories | **unknown — not measured yet** | open question; identifier-dense (typed grids are a candidate), but code has structure none of our benches cover |
+
+Two rules fall out of this table. First: **measure on your own corpus** — 20–40
+ground-truth queries and the bundled benches (`bench/run_bench.py`,
+`bench/fusion_bench.py`) settle in minutes what no doctrine can. Second: the roadmap
+follows the same logic — `mosaic calibrer` already picks encoding weights from your
+ground truth; teaching it to pick the *architecture* flags (typed? fused? reranked?) the
+same way is the natural next step.
+
 ## The features, each one measured
 
 ### Native three-channel fusion (`--hybride` / `--fusion`)
