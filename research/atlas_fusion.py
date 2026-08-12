@@ -107,11 +107,13 @@ def main() -> int:
             if line.strip()
         )
     ]
-    # échantillon (mêmes conventions déterministes que les étapes 1 et 2)
+    # échantillon (mêmes conventions déterministes que les étapes 1 et 2) —
+    # MOSAIC_ECHANTILLON surcharge la taille (grand = corpus plein, confirmation)
+    taille_ech = int(os.environ.get("MOSAIC_ECHANTILLON", ECHANTILLON_DOCS))
     fichiers = sorted(p for p in corpus_src.iterdir() if p.is_file())
     dossier = tempfile.TemporaryDirectory()
     corpus = corpus_src
-    if len(fichiers) > ECHANTILLON_DOCS:
+    if len(fichiers) > taille_ech:
         corpus = Path(dossier.name) / "corpus"
         corpus.mkdir()
         garde = fichiers[:ECHANTILLON_DOCS]
@@ -123,7 +125,7 @@ def main() -> int:
         ]
     verites = [rel for _q, rel in requetes]
     print(
-        f"corpus {corpus_src.name} : échantillon {ECHANTILLON_DOCS}, "
+        f"corpus {corpus_src.name} : {min(len(fichiers), taille_ech)} docs indexés, "
         f"{len(requetes)} requêtes"
     )
 
