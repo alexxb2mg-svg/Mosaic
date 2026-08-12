@@ -32,6 +32,10 @@ thousands of tokens of raw files**. The engine is a token-saving machine by cons
 - **Temporal truth** (`mosaic actuel`) — on an evolving folder, versions of the same aspect
   are grouped; the newest is **canonical**, older ones are flagged **stale**. An agent can
   no longer mistake outdated data for truth.
+- **Typed grids** (`--grilles-typees`) — route each kind of data to its own grid (meaning /
+  identifiers / paths / your custom types) and synthesize at read time. Identifier lookup
+  stops drowning in prose, each grid gets tailored weights and dimensions, and the meaning
+  grid shrinks 4× at equal-or-better accuracy on structured corpora.
 - **Cross-index meta-search** (`mosaic meta`) — query several indexes at once, fused by
   rank (RRF), each result keeping its provenance.
 - **Graph traversal without a graph database** (`mosaic chemin`) — documents are linked to
@@ -158,6 +162,31 @@ fuses by Reciprocal Rank Fusion (K=60), drops any channel with no signal on the 
 and reports each result's per-channel rank for explainability. Because the grid+BM25 duo
 *without* embeddings measured below BM25 alone (0.460 < 0.482), fusion requires all three
 channels and fails loudly otherwise.
+
+### Typed grids (`--grilles-typees`)
+
+The encoder can **sort at write time**: each kind of data goes to *its own* grid — meaning
+words in one, identifiers (reference codes) in another, path tokens in a third, plus any
+custom types your profile declares (`grilles` key, routing patterns). Each grid gets its
+own recipe: weights (the ref grid is pure signature — an identifier is lexical), smoothing
+(never on identifiers — pulling two neighboring codes together manufactures confusions),
+and dimensions sized to its actual vocabulary (reported by `stats()`). At read time the
+synthesis weighs each grid by the query's idf mass per type, with **precedence for the ref
+reading** when the query carries an identifier (rare token, df ≤ 2 — threshold calibrated
+by measurement); `lectures` exposes the per-grid cosine.
+
+```bash
+mosaic build ./docs -o ./index --grilles-typees
+mosaic search "a9f77216 breaker" ./index    # the synthesis routes by itself
+```
+
+Measured on 500 real product records against the standard engine *with* its facet-based
+ref boost: a reference drowned in noise words **0.90 vs 0.825**, bare reference 0.9833 vs
+0.975, cross-vendor join 1.0 on both sides, plain designations 0.9333 vs 0.9667 — with a
+meaning grid **4× smaller** (3,072 dims vs 12,288). On prose with nothing to sort
+(Alloprof) it is neutral-to-slightly-negative, so it stays **opt-in per corpus**, never a
+default. Existing indexes remain readable and searchable unchanged; `--rerank` is not yet
+supported on a typed index (loud refusal).
 
 ### Embeddings (optional but recommended)
 

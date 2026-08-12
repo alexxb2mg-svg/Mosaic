@@ -28,7 +28,11 @@ from pathlib import Path
 # contexte d'année). Un profil `roles` la REMPLACE entièrement (déclaratif pur, tout visible).
 ROLES_RESERVES_DEFAUT = None  # sentinel : « utiliser la logique historique »
 
-_CLES_VALIDES = {"nom", "description", "roles", "types", "refs"}
+_CLES_VALIDES = {"nom", "description", "roles", "types", "refs", "grilles"}
+# grilles typées (v4) : surcharge des types de base (dim/poids/lissage/embeddings)
+# ou déclaration de types custom (motif de routage OBLIGATOIRE pour un type custom)
+_CLES_GRILLE = {"dim", "poids", "lissage", "embeddings", "motif"}
+_TYPES_BASE = {"sens", "ref", "chemin"}
 _CLES_ROLE = {"role", "motif", "valeur"}
 _CLES_REFS = {"min_mixte", "min_chiffres", "motif"}
 
@@ -102,6 +106,60 @@ def valider(profil: dict) -> dict:
                 raise ValueError(
                     f"profil.refs.motif : regex invalide {motif_refs!r} ({exc})"
                 ) from None
+    if "grilles" in profil:
+        g_brut = profil["grilles"]
+        if not isinstance(g_brut, dict) or not g_brut:
+            raise ValueError(
+                f"profil.grilles : objet non vide attendu, reçu {g_brut!r}"
+            )
+        for nom_g, cfg_brut in g_brut.items():
+            if not isinstance(cfg_brut, dict):
+                raise ValueError(
+                    f"profil.grilles.{nom_g} : objet attendu, reçu {cfg_brut!r}"
+                )
+            cfg: dict = cfg_brut
+            if set(cfg) - _CLES_GRILLE:
+                raise ValueError(
+                    f"profil.grilles.{nom_g} : clés valides {sorted(_CLES_GRILLE)}, "
+                    f"reçu {cfg!r}"
+                )
+            if nom_g not in _TYPES_BASE and "motif" not in cfg:
+                raise ValueError(
+                    f"profil.grilles.{nom_g} : un type custom exige un `motif` "
+                    "(sa règle de routage) — sans lui, la grille ne recevrait jamais rien"
+                )
+            if "motif" in cfg:
+                if nom_g in _TYPES_BASE:
+                    raise ValueError(
+                        f"profil.grilles.{nom_g} : `motif` interdit sur un type de base "
+                        "(leur routage est la règle du moteur, pas une regex)"
+                    )
+                try:
+                    re.compile(str(cfg["motif"]))
+                except re.error as exc:
+                    raise ValueError(
+                        f"profil.grilles.{nom_g}.motif : regex invalide ({exc})"
+                    ) from None
+            if "dim" in cfg and (not isinstance(cfg["dim"], int) or cfg["dim"] < 3):
+                raise ValueError(
+                    f"profil.grilles.{nom_g}.dim : entier >= 3 attendu, reçu {cfg['dim']!r}"
+                )
+            if "lissage" in cfg and (
+                not isinstance(cfg["lissage"], int) or cfg["lissage"] < 0
+            ):
+                raise ValueError(
+                    f"profil.grilles.{nom_g}.lissage : entier >= 0 attendu, "
+                    f"reçu {cfg['lissage']!r}"
+                )
+            if "poids" in cfg and (
+                not isinstance(cfg["poids"], (list, tuple))
+                or len(cfg["poids"]) != 3
+                or not all(isinstance(x, (int, float)) for x in cfg["poids"])
+            ):
+                raise ValueError(
+                    f"profil.grilles.{nom_g}.poids : triplet numérique attendu, "
+                    f"reçu {cfg['poids']!r}"
+                )
     return {
         **profil,
         "types": {k.lower(): v for k, v in profil.get("types", {}).items()},

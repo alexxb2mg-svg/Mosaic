@@ -9,6 +9,8 @@ from mosaic import rerank as rerank_module
 from mosaic import facettes as facettes_module
 from mosaic import profil as profil_module
 from mosaic.bm25 import Bm25
+from mosaic import typage as typage_module
+from mosaic.typage import GrilleTypee
 from mosaic.collocations import detect, merge
 from mosaic.docio import _EXTS, _path_tokens, _read_text, _read_text_convertible
 from mosaic.embeddings import Embeddings
@@ -102,6 +104,7 @@ class Index:
         facettes: dict[str, dict[str, str]] | None = None,
         profil: dict | None = None,
         bm25: Bm25 | None = None,
+        grilles: dict[str, GrilleTypee] | None = None,
     ) -> None:
         self.index_dir = index_dir
         self.profiles = profiles
@@ -145,6 +148,11 @@ class Index:
         # Canal BM25 (fusion hybride, opt-in --hybride) : None quand l'index n'a pas de
         # bm25.msbm — search(fusion=True) refuse loud (cf. queries.search_fusion).
         self.bm25: Bm25 | None = bm25
+        # Grilles typées (v4, opt-in --grilles-typees) : None = index historique à
+        # grille unique (comportement inchangé). Non-None = dict des grilles EXTRA
+        # (ref/chemin/custom) — la grille « sens » est la grille principale
+        # (mat/profiles ci-dessus). search() route et synthétise (queries.search_typee).
+        self.grilles: dict[str, GrilleTypee] | None = grilles
         # Cache float32 OPTIONNEL de la matrice documents (chemin chaud). Le produit
         # int8 @ float upcaste toute la matrice À CHAQUE requête (mesuré : 577 ms sur
         # 18k docs contre 51 ms pré-converti — 11x). Trade-off explicite RAM vs latence :
@@ -188,6 +196,7 @@ class Index:
         type_doc: bool = False,
         profil: dict | None = None,
         hybride: bool = False,
+        grilles_typees: bool = False,
     ) -> "Index":
         corpus_dir, index_dir = Path(corpus_dir), Path(index_dir)
         if not corpus_dir.is_dir():
@@ -232,6 +241,9 @@ class Index:
             and not (EXCLUDED_DIRS & set(p.relative_to(corpus_dir).parts))
         )
         raw: list[tuple[str, list[str]]] = []
+        chemins_bruts: list[
+            list[str]
+        ] = []  # grilles typées : le chemin est un FLUX à part
         rerank_texts: list[str] = []
         facettes: dict[str, dict[str, str]] = {}
         ignores = 0
@@ -245,9 +257,17 @@ class Index:
                     ignores += 1
                     continue
             content_tokens = tokenize(text)
-            tokens = (
-                _path_tokens(doc_id) + content_tokens if index_paths else content_tokens
-            )
+            if grilles_typees:
+                # provenance séparée : le chemin ira dans SA grille (jamais superposé
+                # au contenu — c'est le principe même du tri à l'écriture)
+                tokens = content_tokens
+                chemins_bruts.append(_path_tokens(doc_id) if index_paths else [])
+            else:
+                tokens = (
+                    _path_tokens(doc_id) + content_tokens
+                    if index_paths
+                    else content_tokens
+                )
             facettes[doc_id] = facettes_module.extraire(p, doc_id, text, profil=profil)
             if type_doc:  # facette « type de document » aussi DANS la grille (opt-in)
                 tokens = tokenize(facettes[doc_id]["type"]) + tokens
@@ -262,6 +282,29 @@ class Index:
         docs = [
             (doc_id, merge(merge(tokens, colloc), colloc)) for doc_id, tokens in canon
         ]
+        config_grilles: dict[str, dict] = {}
+        flux_par_doc: list[dict[str, list[str]]] = []
+        if grilles_typees:
+            # Routage (spec v4) : chaque document est réparti entre les grilles — le
+            # flux « sens » DEVIENT le contenu de la grille principale, dimensionnée
+            # au vocabulaire réel ; les autres grilles sont construites plus bas.
+            config_grilles = typage_module.config_grilles(profil)
+            regles_refs = (profil or {}).get("refs")
+            chemins_canon = [canonicalize(c, compiled) for c in chemins_bruts]
+            flux_par_doc = [
+                typage_module.router_flux(
+                    tokens, chemins_canon[i], config_grilles, regles_refs
+                )
+                for i, (_doc_id, tokens) in enumerate(docs)
+            ]
+            docs = [
+                (doc_id, flux["sens"]) for (doc_id, _t), flux in zip(docs, flux_par_doc)
+            ]
+            vocab_sens = len({t for f in flux_par_doc for t in f["sens"]})
+            dim = typage_module.dim_effective(
+                int(config_grilles["sens"]["dim"]), vocab_sens
+            )
+            grid = typage_module.grille_de_dim(dim)
         profiles = Profiles(dim)
         for _, tokens in docs:
             profiles.learn(tokens)
@@ -290,7 +333,47 @@ class Index:
             rerank_model = rerank_module.MODEL_NAME
         # Postings BM25 sur le MÊME flux de tokens que la grille (canonical + collocations,
         # chemins selon index_paths) : les deux canaux de la fusion voient le même monde.
-        bm25 = Bm25.from_docs(docs) if hybride else None
+        # Index typé : le flux complet est la réunion des flux par grille (le monde entier).
+        if hybride and grilles_typees:
+            bm25 = Bm25.from_docs(
+                [
+                    (doc_id, [t for typ in sorted(flux) for t in flux[typ]])
+                    for (doc_id, _s), flux in zip(docs, flux_par_doc)
+                ]
+            )
+        else:
+            bm25 = Bm25.from_docs(docs) if hybride else None
+        # Grilles typées EXTRA (ref/chemin/custom) — la grille sens est déjà la
+        # principale. Chaque grille : sa dimension (taillée au vocab), ses poids, son
+        # lissage (JAMAIS sur des identifiants), ses embeddings (spec v4 §1-4).
+        grilles: dict[str, GrilleTypee] | None = None
+        if grilles_typees:
+            grilles = {}
+            for t, cfg in config_grilles.items():
+                if t == "sens":
+                    continue
+                flux_t = [f[t] for f in flux_par_doc]
+                vocab_t = len({tok for toks in flux_t for tok in toks})
+                dim_t = typage_module.dim_effective(
+                    int(cfg["dim"]), vocab_t, cfg.get("poids")
+                )
+                prof_t = Profiles(dim_t)
+                for toks in flux_t:
+                    prof_t.learn(toks)
+                # finalize INCONDITIONNEL : rows peut être vide alors que la grille
+                # sert (une réf SEULE par document ne forme aucune paire de
+                # cooccurrence — la signature porte tout le signal ; état normal).
+                prof_t.finalize(profile_weighting)
+                if prof_t.rows:
+                    _apply_smoothing(prof_t, int(cfg.get("lissage") or 0))
+                mat_t = np.zeros((len(flux_t), dim_t), dtype=np.int8)
+                norms_t = np.zeros(len(flux_t), dtype=np.float32)
+                emb_t = embeddings if cfg.get("embeddings") else None
+                poids_t = tuple(cfg["poids"]) if cfg.get("poids") else weights
+                for row, toks in enumerate(flux_t):
+                    q_t, n_t = encode(toks, prof_t, embeddings=emb_t, weights=poids_t)
+                    mat_t[row], norms_t[row] = q_t, n_t
+                grilles[t] = GrilleTypee(prof_t, mat_t, norms_t, dict(cfg))
         index_dir.mkdir(parents=True, exist_ok=True)
         idx = cls(
             index_dir,
@@ -317,6 +400,7 @@ class Index:
             facettes=facettes,
             profil=profil,
             bm25=bm25,
+            grilles=grilles,
         )
         if relations:
             idx._build_relations()
@@ -425,6 +509,21 @@ class Index:
                 "bm25.msbm incohérent avec l'index (nombre de documents différent) — "
                 "reconstruire avec `mosaic build --hybride`"
             )
+        grilles: dict[str, GrilleTypee] | None = None
+        gt_meta = meta.get("grilles_typees")
+        if gt_meta:
+            grilles = {}
+            for t, cfg in gt_meta.items():
+                if t == "sens":  # la grille sens EST la grille principale déjà chargée
+                    continue
+                mat_t, norms_t, _ids_t, _grid_t = load_docs(index_dir, suffixe=f"_{t}")
+                if mat_t.shape[0] != len(ids):
+                    raise ValueError(
+                        f"docs_{t}.msei incohérent avec l'index (nombre de documents "
+                        "différent) — reconstruire avec `mosaic build --grilles-typees`"
+                    )
+                prof_t, _c, _l, _m = load_vocab(index_dir, lazy=lazy, suffixe=f"_{t}")
+                grilles[t] = GrilleTypee(prof_t, mat_t, norms_t, dict(cfg))
         # acc est déjà lissé sur disque (build/add l'ont matérialisé) : on ne
         # réapplique PAS smooth() ici, seulement au prochain add() (re-finalize).
         return cls(
@@ -455,6 +554,7 @@ class Index:
             facettes=facettes_module.charger(index_dir),
             profil=meta.get("profil"),
             bm25=bm25,
+            grilles=grilles,
         )
 
     def _save(self) -> None:
@@ -488,6 +588,26 @@ class Index:
             save_rerank(self.index_dir, self.rerank_vecs, self.rerank_model)
         if self.bm25 is not None:
             save_bm25(self.index_dir, self.bm25)
+        if self.grilles is not None:
+            # meta : la carte des grilles (sens = grille principale, dims EFFECTIVES) ;
+            # fichiers : un couple docs_<t>.msei / vocab_<t>.msev par grille extra,
+            # formats historiques réutilisés tels quels.
+            gt_meta: dict[str, dict] = {"sens": {"dim": int(self.mat.shape[1])}}
+            for t, g in self.grilles.items():
+                gt_meta[t] = {
+                    "dim": g.dim,
+                    "poids": list(g.config["poids"]) if g.config.get("poids") else None,
+                    "lissage": int(g.config.get("lissage") or 0),
+                    "embeddings": bool(g.config.get("embeddings")),
+                }
+                grid_t = typage_module.grille_de_dim(g.dim)
+                save_docs(
+                    self.index_dir, g.mat, g.norms, self.ids, grid_t, suffixe=f"_{t}"
+                )
+                save_vocab(
+                    self.index_dir, g.profiles, set(), grid_t, {}, suffixe=f"_{t}"
+                )
+            extra_meta["grilles_typees"] = gt_meta
         if self.relations_mat is not None:
             assert (
                 self.relations_norms is not None
@@ -573,17 +693,30 @@ class Index:
         else:
             text = _read_text(file)
         raw_tokens = tokenize(text)
-        if self.index_paths:
-            # Revue finale v1.5 (critique, reproduit) : tokeniser file.as_posix() (le chemin
-            # TEL QUE PASSÉ par l'appelant, souvent absolu) injectait les répertoires parents
-            # (temp, nom d'utilisateur…) dans le vocabulaire PERSISTÉ de l'index — build()
-            # n'a jamais ce problème (doc_id relatif au corpus). add() n'a pas de notion de
-            # corpus_dir : le seul chemin cohérent avec ce qui est réellement stocké est
-            # file.name, exactement ce que reçoit self.ids.append() plus bas.
-            raw_tokens = _path_tokens(file.name) + raw_tokens
+        # Revue finale v1.5 (critique, reproduit) : tokeniser file.as_posix() (le chemin
+        # TEL QUE PASSÉ par l'appelant, souvent absolu) injectait les répertoires parents
+        # (temp, nom d'utilisateur…) dans le vocabulaire PERSISTÉ de l'index — build()
+        # n'a jamais ce problème (doc_id relatif au corpus). add() n'a pas de notion de
+        # corpus_dir : le seul chemin cohérent avec ce qui est réellement stocké est
+        # file.name, exactement ce que reçoit self.ids.append() plus bas.
+        chemin_brut = _path_tokens(file.name) if self.index_paths else []
+        if self.grilles is None and self.index_paths:
+            raw_tokens = chemin_brut + raw_tokens
         tokens = merge(
             merge(canonicalize(raw_tokens, self._compiled), self.colloc), self.colloc
         )
+        flux_add: dict[str, list[str]] | None = None
+        if self.grilles is not None:
+            # index typé : même routage qu'au build — le chemin va dans SA grille,
+            # la grille principale ne reçoit que le flux « sens »
+            config_add = typage_module.config_grilles(self.profil)
+            flux_add = typage_module.router_flux(
+                tokens,
+                canonicalize(chemin_brut, self._compiled),
+                config_add,
+                (self.profil or {}).get("refs"),
+            )
+            tokens = flux_add["sens"]
 
         # Encodage rerank calculé ICI, AVANT toute mutation de self (profiles/mat/norms/ids) :
         # available() ne garantit que l'import, pas qu'un encode() runtime réussisse (poids
@@ -614,10 +747,35 @@ class Index:
         if new_rerank_vec is not None:
             assert self.rerank_vecs is not None  # non-None dès que new_rerank_vec l'est
             self.rerank_vecs = np.vstack([self.rerank_vecs, new_rerank_vec])
+        if self.grilles is not None:
+            assert flux_add is not None  # posé plus haut dès que grilles l'est
+            for t, g in self.grilles.items():
+                toks_t = flux_add.get(t, [])
+                g.profiles.learn(toks_t)
+                # finalize INCONDITIONNEL — deux raisons architecturales : (1) rows
+                # peut être vide alors que la grille sert (réfs sans paires de
+                # cooccurrence : la signature porte tout) ; (2) c'est finalize qui
+                # réalloue acc et COUPE le memmap du chargement paresseux — le sauter
+                # laisse un handle Windows ouvert et _save() échoue (mesuré).
+                g.profiles.finalize(self.profile_weighting)
+                if g.profiles.rows:
+                    _apply_smoothing(g.profiles, int(g.config.get("lissage") or 0))
+                emb_t = self.embeddings if g.config.get("embeddings") else None
+                poids_t = (
+                    tuple(g.config["poids"]) if g.config.get("poids") else self.weights
+                )
+                q_t, n_t = encode(toks_t, g.profiles, embeddings=emb_t, weights=poids_t)
+                g.mat = np.vstack([g.mat, q_t[np.newaxis, :]])
+                g.norms = np.append(g.norms, np.float32(n_t))
         if self.bm25 is not None:
-            # même flux de tokens que la ligne ajoutée à la matrice grille (invariant du
-            # canal : les deux voient le même monde, cf. build)
-            self.bm25.add_doc(tokens)
+            # même flux de tokens que les grilles (invariant du canal : les deux voient
+            # le même monde, cf. build) — index typé : le flux COMPLET, toutes grilles
+            complet = (
+                tokens
+                if flux_add is None
+                else [t for typ in sorted(flux_add) for t in flux_add[typ]]
+            )
+            self.bm25.add_doc(complet)
         if self.relations_mat is not None:
             # add() n'a pas de notion de corpus_dir (cf. commentaire index_paths plus haut) :
             # entities_from_path(file.name) n'a donc jamais de segment de dossier -> canal
@@ -665,6 +823,11 @@ class Index:
                 "fusion et rerank sont exclusifs : la fusion intègre déjà le canal "
                 "embeddings comme canal plein"
             )
+        if self.grilles is not None and rerank:
+            raise ValueError(
+                "rerank sur un index à grilles typées : pas encore supporté — la "
+                "synthèse typée est déjà multi-lectures (utiliser la recherche nue)"
+            )
         refs_requete = (
             facettes_module.refs_du_texte(text, (self.profil or {}).get("refs"))
             if self.facettes
@@ -673,6 +836,8 @@ class Index:
         if type_filtre is None and recence == 0.0 and not refs_requete:
             if fusion:
                 return queries.search_fusion(self, text, k)
+            if self.grilles is not None:
+                return queries.search_typee(self, text, k)
             return queries.search(self, text, k, rerank, rerank_lambda, rerank_depth)
         if not self.facettes:
             raise ValueError(
@@ -686,11 +851,12 @@ class Index:
         # surcoût est négligeable : le produit matriciel complet domine, indépendant de k.
         profond = bool(type_filtre) or bool(refs_requete)
         pool = min(len(self.ids), max(k * 40, 400)) if profond else max(k * 5, 50)
-        hits = (
-            queries.search_fusion(self, text, pool)
-            if fusion
-            else queries.search(self, text, pool, rerank, rerank_lambda, rerank_depth)
-        )
+        if fusion:
+            hits = queries.search_fusion(self, text, pool)
+        elif self.grilles is not None:
+            hits = queries.search_typee(self, text, pool)
+        else:
+            hits = queries.search(self, text, pool, rerank, rerank_lambda, rerank_depth)
         return facettes_module.appliquer(
             hits,
             self.facettes,
@@ -785,6 +951,11 @@ class Index:
             self.bm25 is not None
         ):  # index hybride : la fusion trois canaux est disponible
             s["hybride"] = True
+        if self.grilles is not None:  # v4 : dims EFFECTIVES par grille (auto visibles)
+            s["grilles_typees"] = {
+                "sens": int(self.mat.shape[1]),
+                **{t: g.dim for t, g in self.grilles.items()},
+            }
         if self.relations_mat is not None:
             s["relations"] = True
         if (

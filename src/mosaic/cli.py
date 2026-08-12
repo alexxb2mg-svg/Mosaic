@@ -171,6 +171,15 @@ def main(argv: list[str] | None = None) -> int:
         "pour permettre `search --rerank` (défaut désactivé, nécessite model2vec)",
     )
     p_build.add_argument(
+        "--grilles-typees",
+        action="store_true",
+        help="index à GRILLES TYPÉES (v4) : chaque type de donnée dans SA grille "
+        "(sens/réf/chemin, extensible par le profil), poids et lissage par grille, "
+        "dimensions taillées au vocabulaire — la recherche route et synthétise "
+        "(pondération idf + préséance identifiant). Mesuré : noyade de réfs "
+        "0.27 -> 0.86, même qualité au quart du budget mémoire",
+    )
+    p_build.add_argument(
         "--hybride",
         action="store_true",
         help="index hybride : stocke les postings BM25 (bm25.msbm) ET les vecteurs "
@@ -561,6 +570,7 @@ def main(argv: list[str] | None = None) -> int:
                 doc_weight=doc_weight,
                 rerank_vectors=args.rerank_vectors,
                 hybride=args.hybride,
+                grilles_typees=args.grilles_typees,
                 index_paths=not args.no_path_tokens,
                 ocr=args.ocr,
                 relations=args.relations,

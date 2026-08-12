@@ -19,6 +19,7 @@ from mosaic.encoder import _signed_counts, encode, quantize
 from mosaic.lexicon import canonicalize
 from mosaic import ingest
 from mosaic.meta import K_RRF_DEFAULT
+from mosaic import typage as typage_module
 from mosaic.relations import bind, entites_du_canal, normalize_entity
 from mosaic.tokenize import tokenize
 
@@ -87,6 +88,83 @@ def _cos_all(idx: "Index", text: str) -> np.ndarray:
     denom = idx.norms * np.float32(qnorm)
     denom = np.where(denom == 0, np.float32(1.0), denom)
     return scores.astype(np.float32) / denom
+
+
+def _canaux_typee(
+    idx: "Index", text: str
+) -> tuple[list[tuple[str, float, np.ndarray]], bool]:
+    """Lectures par grille d'un index typé : [(type, masse_idf, cos)], et le drapeau
+    « la requête porte un IDENTIFIANT » (tokens ref tous rares, df <= DF_MAX_IDENTIFIANT
+    — cf. mosaic.typage, leçon du banc produits). Une grille sans signal est absente."""
+    assert idx.grilles is not None
+    config = typage_module.config_grilles(idx.profil)
+    tokens = merge(
+        merge(canonicalize(tokenize(text), idx._compiled), idx.colloc), idx.colloc
+    )
+    flux = typage_module.router_flux(tokens, [], config, (idx.profil or {}).get("refs"))
+    canaux: list[tuple[str, float, np.ndarray]] = []
+    ref_identifiant = False
+    for t, qtoks in flux.items():
+        if not qtoks:
+            continue
+        if t == "sens":
+            prof, mat, norms = idx.profiles, idx.mat_recherche, idx.norms
+            emb, poids = idx.embeddings, idx.weights
+        else:
+            g = idx.grilles.get(t)
+            if g is None:
+                continue
+            prof, mat, norms = g.profiles, g.mat, g.norms
+            cfg = g.config
+            emb = idx.embeddings if cfg.get("embeddings") else None
+            poids = tuple(cfg["poids"]) if cfg.get("poids") else idx.weights
+        q, qn = encode(qtoks, prof, embeddings=emb, weights=poids)
+        if qn == 0.0:
+            continue
+        denom = norms * np.float32(qn)
+        denom = np.where(denom == 0, np.float32(1.0), denom)
+        cos = (mat @ q.astype(np.float32)).astype(np.float32) / denom
+        if not np.any(cos):
+            continue
+        canaux.append((t, sum(prof.idf(x) for x in qtoks), cos))
+        if t == "ref":
+            ref_identifiant = all(
+                prof.df.get(x, 0) <= typage_module.DF_MAX_IDENTIFIANT for x in qtoks
+            )
+    return canaux, ref_identifiant
+
+
+def search_typee(idx: "Index", text: str, k: int = 10) -> list[dict]:
+    """Recherche sur index à GRILLES TYPÉES (v4) : chaque grille est lue avec SA recette,
+    la synthèse recombine — pondération par la masse idf de la requête par type, et
+    PRÉSÉANCE lexicographique de la lecture ref quand la requête porte un identifiant
+    (rare, df <= 3). Les deux règles sont MESURÉES (banc produits réels : noyade
+    0.27 -> 0.86, désignation préservée par le gate). `lectures` expose le cosinus par
+    grille (explicabilité, même esprit que `rangs` de la fusion)."""
+    n = len(idx.ids)
+    if n == 0:
+        return []
+    canaux, ref_identifiant = _canaux_typee(idx, text)
+    if not canaux:
+        return []
+    total = sum(m for _t, m, _c in canaux)
+    pondere = np.zeros(n, dtype=np.float64)
+    for _t, masse, cos in canaux:
+        pondere += (masse / total) * cos.astype(np.float64)
+    cos_ref = next((cos for t, _m, cos in canaux if t == "ref"), None)
+    if ref_identifiant and cos_ref is not None:
+        ordre = np.lexsort((-pondere, -np.round(cos_ref.astype(np.float64), 4)))
+    else:
+        ordre = np.argsort(-pondere, kind="stable")
+    lectures = {t: cos for t, _m, cos in canaux}
+    return [
+        {
+            "id": idx.ids[i],
+            "score": round(float(pondere[i]), 6),
+            "lectures": {t: round(float(c[i]), 4) for t, c in lectures.items()},
+        }
+        for i in ordre[:k]
+    ]
 
 
 def search_fusion(idx: "Index", text: str, k: int = 10) -> list[dict]:

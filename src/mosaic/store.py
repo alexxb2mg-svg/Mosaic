@@ -103,9 +103,12 @@ def save_docs(
     norms: np.ndarray,
     ids: list[str],
     grid: tuple[int, int, int],
+    suffixe: str = "",
 ) -> None:
+    """`suffixe` (v4 grilles typées) : "" = fichier historique docs.msei ; "_ref" ->
+    docs_ref.msei — même format, un couple docs/vocab par grille."""
     _write(
-        path / "docs.msei",
+        path / f"docs{suffixe}.msei",
         _MAGIC_DOCS,
         grid,
         mat.shape[0],
@@ -117,8 +120,9 @@ def save_docs(
 
 def load_docs(
     path: Path,
+    suffixe: str = "",
 ) -> tuple[np.ndarray, np.ndarray, list[str], tuple[int, int, int]]:
-    grid, n, meta, _vmin, raw = _read(path / "docs.msei", _MAGIC_DOCS)
+    grid, n, meta, _vmin, raw = _read(path / f"docs{suffixe}.msei", _MAGIC_DOCS)
     dim = grid[0] * grid[1] * grid[2]
     norms = np.frombuffer(raw, dtype=np.float32, count=n)
     mat = np.frombuffer(raw, dtype=np.int8, offset=4 * n).reshape(n, dim).copy()
@@ -269,6 +273,7 @@ def save_vocab(
     grid: tuple[int, int, int],
     lexicon: dict[str, str],
     extra_meta: dict | None = None,
+    suffixe: str = "",
 ) -> None:
     order = sorted(profiles.rows, key=profiles.rows.__getitem__)
     meta = {
@@ -306,7 +311,7 @@ def save_vocab(
         + struct.pack("<d", profiles.total_mass)
     )
     _write(
-        path / "vocab.msev",
+        path / f"vocab{suffixe}.msev",
         _MAGIC_VOCAB,
         grid,
         len(order),
@@ -355,7 +360,7 @@ def _parse_sparse_block(
 
 
 def load_vocab(
-    path: Path, lazy: bool = False
+    path: Path, lazy: bool = False, suffixe: str = ""
 ) -> tuple[Profiles, set[tuple[str, str]], dict[str, str], dict]:
     """`lazy=True` (v1.5, réservé à Index.open côté recherche) : évite de lire les ~V·dim·4
     octets du bloc acc (et le bloc épars, jamais utile à search()) en RAM. `acc` devient un
@@ -364,7 +369,7 @@ def load_vocab(
     `Profiles._pending_sparse`, déclenché par le premier learn()/finalize() (add()).
     Fichiers legacy v1.0 : comportement inchangé quel que soit `lazy` (pas de memmap
     pertinent — acc y est en int32, add() est de toute façon refusé côté Index)."""
-    file = path / "vocab.msev"
+    file = path / f"vocab{suffixe}.msev"
     if not lazy:
         return _load_vocab_eager(file)
     return _load_vocab_lazy(file)
