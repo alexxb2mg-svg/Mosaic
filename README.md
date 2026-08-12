@@ -1,5 +1,7 @@
 # Mosaic
 
+[![CI](https://github.com/alexxb2mg-svg/Mosaic/actions/workflows/ci.yml/badge.svg)](https://github.com/alexxb2mg-svg/Mosaic/actions/workflows/ci.yml)
+
 **Semantic search over your own documents, built in the open from textbook parts —
 local, deterministic, no LLM in the loop. As much a working lesson as a tool.**
 
