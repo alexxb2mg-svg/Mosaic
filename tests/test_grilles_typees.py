@@ -91,10 +91,73 @@ def test_requete_sans_type_ref_ponderation_simple(tmp_path):
     )  # grille silencieuse : jamais dans la sortie
 
 
-def test_rerank_refuse_sur_index_type(tmp_path):
+def _fake_model(monkeypatch) -> None:
+    """Vecteurs déterministes seedés par hash(texte) — même harnais que
+    tests/test_index_rerank.py : pas de dépendance au vrai model2vec."""
+    import numpy as np
+
+    from mosaic import rerank
+
+    class _FakeModel:
+        def encode(self, texts):
+            out = np.zeros((len(texts), rerank.DIM), dtype=np.float32)
+            for i, t in enumerate(texts):
+                out[i] = np.random.default_rng(hash(t) & 0xFFFFFFFF).normal(
+                    size=rerank.DIM
+                )
+            return out
+
+    monkeypatch.setattr(rerank, "StaticModel", _FakeModel)
+    monkeypatch.setattr(rerank, "_get_model", lambda: _FakeModel())
+
+
+def test_rerank_typee_sans_msrv_refuse_clair(tmp_path):
+    """Index typé SANS rerank.msrv : le refus nomme le geste de reconstruction, jamais
+    un rerank silencieusement ignoré (même contrat que l'index standard)."""
     idx = _typee(tmp_path)
-    with pytest.raises(ValueError, match="typées"):
+    with pytest.raises(ValueError, match="rerank.msrv"):
         idx.search("pose", k=1, rerank=True)
+
+
+def test_rerank_typee_expose_scores_et_lectures(tmp_path, monkeypatch):
+    _fake_model(monkeypatch)
+    idx = Index.build(
+        _corpus(tmp_path), tmp_path / "idx", grilles_typees=True, rerank_vectors=True
+    )
+    hits = idx.search("pose interrupteur", k=3, rerank=True)
+    assert hits, "des résultats sont attendus"
+    for h in hits:
+        assert "score" in h and "score_rerank" in h and "lectures" in h
+    # Déterminisme : deux appels identiques rendent exactement la même liste.
+    assert hits == idx.search("pose interrupteur", k=3, rerank=True)
+
+
+def test_rerank_typee_lambda_1_recouvre_la_synthese_nue(tmp_path, monkeypatch):
+    """λ=1.0 dégénère en synthèse typée pure : l'ordre doit être identique au search
+    sans rerank (le repêcheur ne pèse plus rien)."""
+    _fake_model(monkeypatch)
+    idx = Index.build(
+        _corpus(tmp_path), tmp_path / "idx", grilles_typees=True, rerank_vectors=True
+    )
+    nus = [h["id"] for h in idx.search("pose interrupteur", k=3)]
+    reranques = [
+        h["id"]
+        for h in idx.search("pose interrupteur", k=3, rerank=True, rerank_lambda=1.0)
+    ]
+    assert nus == reranques
+
+
+def test_rerank_typee_preseance_ref_survit_au_repechage(tmp_path, monkeypatch):
+    """Requête porteuse d'un identifiant : la préséance de la lecture ref reste la clé
+    PRIMAIRE même sous rerank (λ=0.0, repêcheur seul) — le porteur exact de la réf ne
+    peut pas être détrôné par un cosinus d'embedding (garantie mesurée du banc produits,
+    préservée par construction)."""
+    _fake_model(monkeypatch)
+    idx = Index.build(
+        _corpus(tmp_path), tmp_path / "idx", grilles_typees=True, rerank_vectors=True
+    )
+    hits = idx.search("a9f77216", k=3, rerank=True, rerank_lambda=0.0)
+    assert hits[0]["id"] == "elec.md"
 
 
 def test_recherche_identique_apres_reouverture(tmp_path):

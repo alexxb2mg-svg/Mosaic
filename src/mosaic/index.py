@@ -823,11 +823,6 @@ class Index:
                 "fusion et rerank sont exclusifs : la fusion intègre déjà le canal "
                 "embeddings comme canal plein"
             )
-        if self.grilles is not None and rerank:
-            raise ValueError(
-                "rerank sur un index à grilles typées : pas encore supporté — la "
-                "synthèse typée est déjà multi-lectures (utiliser la recherche nue)"
-            )
         refs_requete = (
             facettes_module.refs_du_texte(text, (self.profil or {}).get("refs"))
             if self.facettes
@@ -837,7 +832,9 @@ class Index:
             if fusion:
                 return queries.search_fusion(self, text, k)
             if self.grilles is not None:
-                return queries.search_typee(self, text, k)
+                return queries.search_typee(
+                    self, text, k, rerank, rerank_lambda, rerank_depth
+                )
             return queries.search(self, text, k, rerank, rerank_lambda, rerank_depth)
         if not self.facettes:
             raise ValueError(
@@ -854,7 +851,9 @@ class Index:
         if fusion:
             hits = queries.search_fusion(self, text, pool)
         elif self.grilles is not None:
-            hits = queries.search_typee(self, text, pool)
+            hits = queries.search_typee(
+                self, text, pool, rerank, rerank_lambda, rerank_depth
+            )
         else:
             hits = queries.search(self, text, pool, rerank, rerank_lambda, rerank_depth)
         return facettes_module.appliquer(

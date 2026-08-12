@@ -134,13 +134,28 @@ def _canaux_typee(
     return canaux, ref_identifiant
 
 
-def search_typee(idx: "Index", text: str, k: int = 10) -> list[dict]:
+def search_typee(
+    idx: "Index",
+    text: str,
+    k: int = 10,
+    rerank: bool = False,
+    rerank_lambda: float = 0.70,
+    rerank_depth: int = 50,
+) -> list[dict]:
     """Recherche sur index à GRILLES TYPÉES (v4) : chaque grille est lue avec SA recette,
     la synthèse recombine — pondération par la masse idf de la requête par type, et
     PRÉSÉANCE lexicographique de la lecture ref quand la requête porte un identifiant
-    (rare, df <= 3). Les deux règles sont MESURÉES (banc produits réels : noyade
-    0.27 -> 0.86, désignation préservée par le gate). `lectures` expose le cosinus par
-    grille (explicabilité, même esprit que `rangs` de la fusion)."""
+    (rare, df <= DF_MAX_IDENTIFIANT = 2, seuil calibré par la mesure). Les deux règles
+    sont MESURÉES (banc produits réels, vrai moteur : noyade 0.825 -> 0.90 contre le
+    standard avec boost réf facette, désignation préservée par le gate). `lectures`
+    expose le cosinus par grille (explicabilité, même esprit que `rangs` de la fusion).
+
+    Repêcheur : comme sur l'index standard (spec v4 « rerank inchangé — la synthèse
+    typée remplace le seul canal grille »), le mélange λ·synthèse + (1-λ)·cos_m2v
+    re-trie les `rerank_depth` premiers. La préséance ref reste la clé PRIMAIRE sous
+    rerank : un cosinus d'embedding ne peut pas détrôner le porteur exact d'un
+    identifiant — c'est la garantie mesurée du banc produits, elle survit par
+    construction, pas par chance."""
     n = len(idx.ids)
     if n == 0:
         return []
@@ -152,19 +167,62 @@ def search_typee(idx: "Index", text: str, k: int = 10) -> list[dict]:
     for _t, masse, cos in canaux:
         pondere += (masse / total) * cos.astype(np.float64)
     cos_ref = next((cos for t, _m, cos in canaux if t == "ref"), None)
-    if ref_identifiant and cos_ref is not None:
-        ordre = np.lexsort((-pondere, -np.round(cos_ref.astype(np.float64), 4)))
+    # Clé de préséance : lecture ref arrondie, uniquement quand la requête porte un
+    # identifiant — None sinon (la variable porte le rétrécissement de type).
+    preseance = (
+        np.round(cos_ref.astype(np.float64), 4)
+        if ref_identifiant and cos_ref is not None
+        else None
+    )
+    if preseance is not None:
+        ordre = np.lexsort((-pondere, -preseance))
     else:
         ordre = np.argsort(-pondere, kind="stable")
     lectures = {t: cos for t, _m, cos in canaux}
-    return [
-        {
+
+    def _hit(i: int, extra: dict | None = None) -> dict:
+        h = {
             "id": idx.ids[i],
             "score": round(float(pondere[i]), 6),
             "lectures": {t: round(float(c[i]), 4) for t, c in lectures.items()},
         }
-        for i in ordre[:k]
+        if extra:
+            h.update(extra)
+        return h
+
+    if not rerank:
+        return [_hit(i) for i in ordre[:k]]
+
+    # Mêmes refus nets que l'index standard — jamais un rerank silencieusement ignoré.
+    if idx.rerank_vecs is None:
+        raise ValueError(
+            "index sans rerank.msrv : reconstruire avec `mosaic build --rerank-vectors` "
+            "pour utiliser --rerank"
+        )
+    if not rerank_module.available():
+        raise ValueError(
+            '--rerank nécessite model2vec — pip install "model2vec==0.8.2"'
+        )
+    depth = min(rerank_depth, len(ordre))
+    depth_idx = ordre[:depth]
+    cos_m2v = idx.rerank_vecs[depth_idx] @ rerank_module.encode_query(text)
+    blended = np.float64(rerank_lambda) * pondere[depth_idx] + np.float64(
+        1.0 - rerank_lambda
+    ) * cos_m2v.astype(np.float64)
+    if preseance is not None:
+        local_order = np.lexsort((-blended, -preseance[depth_idx]))
+    else:
+        local_order = np.argsort(-blended, kind="stable")
+    resorted_idx = depth_idx[local_order]
+    blended_sorted = blended[local_order]
+    results = [
+        _hit(i, {"score_rerank": round(float(b), 6)})
+        for i, b in zip(resorted_idx[:k], blended_sorted[:k], strict=True)
     ]
+    if len(results) < k:
+        for i in ordre[depth : depth + (k - len(results))]:
+            results.append(_hit(i))
+    return results
 
 
 def search_fusion(idx: "Index", text: str, k: int = 10) -> list[dict]:

@@ -2,10 +2,13 @@
 
 **A sovereign semantic engine: search and remember by *meaning* — on a plain CPU, deterministically, with no LLM in the loop.**
 
-No cloud, no GPU, no per-query bill, no data ever leaving your machine. The same corpus
-always produces the same index, bit for bit. Every document becomes a small **64×64 color
-grid** — a mosaic — and searching means comparing grids: two texts about the same thing get
-two grids that are geometrically close.
+No cloud, no GPU, no per-query bill, no data ever leaving your machine. On a given
+machine, the same corpus always produces the same index, bit for bit; across machines,
+the int8-quantized search matrix is provably identical (BLAS float variance is absorbed
+by quantization — measured, see below), while float artifacts may differ in inert
+decimals. Every document becomes a small **64×64 color grid** — a mosaic — and searching
+means comparing grids: two texts about the same thing get two grids that are
+geometrically close.
 
 <p align="center"><img src="docs/grid_example.png" width="256" alt="A document, as Mosaic sees it: a 64x64 color grid"><br><em>A real document from the bundled benchmark, as the engine sees it.</em></p>
 
@@ -34,8 +37,8 @@ thousands of tokens of raw files**. The engine is a token-saving machine by cons
   no longer mistake outdated data for truth.
 - **Typed grids** (`--grilles-typees`) — route each kind of data to its own grid (meaning /
   identifiers / paths / your custom types) and synthesize at read time. Identifier lookup
-  stops drowning in prose, each grid gets tailored weights and dimensions, and the meaning
-  grid shrinks 4× at equal-or-better accuracy on structured corpora.
+  stops drowning in prose (+7.5 pts on drowned references) and the meaning grid shrinks
+  4×; plain-prose designations pay a small toll (measured below) — opt-in per corpus.
 - **Cross-index meta-search** (`mosaic meta`) — query several indexes at once, fused by
   rank (RRF), each result keeping its provenance.
 - **Graph traversal without a graph database** (`mosaic chemin`) — documents are linked to
@@ -95,8 +98,10 @@ mosaic calibrer bench/corpus --requetes bench/verite.jsonl --explique
 ```
 
 On this corpus the engine reaches **11/12 top-1, 12/12 top-3** with the recommended
-profile — and the calibration demo shows the optimal weights *differ* from the defaults,
-which is the point: every corpus has its own optimum, and measurement finds it.
+profile (**12/12 top-1** with `--grilles-typees` — the last paraphrase trap falls once
+path noise is quarantined in its own grid) — and the calibration demo shows the optimal
+weights *differ* from the defaults, which is the point: every corpus has its own optimum,
+and measurement finds it.
 
 ### A larger benchmark: Alloprof (2,556 docs, 2,316 real queries)
 
@@ -145,9 +150,11 @@ What this benchmark taught us — kept here because it is the honest story:
 - **Determinism holds at scale.** Two independent builds returned identical metrics to the
   fourth decimal (0.3848 / 0.2593).
 
+## The features, each one measured
+
 ### Native three-channel fusion (`--hybride` / `--fusion`)
 
-The winning architecture above is built in — one flag at build time, one at search time:
+The winning architecture of the Alloprof benchmark is built in — one flag at build time, one at search time:
 
 ```bash
 mosaic build ./docs -o ./index --hybride     # BM25 postings + model2vec vectors
@@ -185,8 +192,13 @@ ref boost: a reference drowned in noise words **0.90 vs 0.825**, bare reference 
 0.975, cross-vendor join 1.0 on both sides, plain designations 0.9333 vs 0.9667 — with a
 meaning grid **4× smaller** (3,072 dims vs 12,288). On prose with nothing to sort
 (Alloprof) it is neutral-to-slightly-negative, so it stays **opt-in per corpus**, never a
-default. Existing indexes remain readable and searchable unchanged; `--rerank` is not yet
-supported on a typed index (loud refusal).
+default. Existing indexes remain readable and searchable unchanged. `--rerank` works on a
+typed index (build with `--grilles-typees --rerank-vectors`): the λ·synthesis +
+(1−λ)·cos_m2v blend re-sorts the top-depth, and the ref reading keeps **primary-key
+precedence** — an embedding cosine cannot dethrone the exact holder of an identifier.
+Measured on the 500-record product bench: bare ref 0.9917 (vs 0.9833 without rerank),
+drowned ref 0.9083 (vs 0.90), designations unchanged — the reranker helps on identifier
+terrain and costs nothing elsewhere.
 
 ### Embeddings (optional but recommended)
 
@@ -201,7 +213,8 @@ mosaic build ./docs -o ./index --embeddings <table.msee> --abtt 2 --rerank-vecto
 
 ## How it works
 
-Each document is encoded into a **12,288-dimension grid** (64×64×3) that superposes three
+Each document is encoded into a **12,288-dimension grid** (64×64×3, the default geometry —
+typed grids size each grid to its own vocabulary instead) that superposes three
 channels: a deterministic SHA-seeded **signature** per token, a **co-occurrence profile**
 learned from *your* corpus (PPMI + truncated SVD), and optionally a static **embedding**.
 Search is a cosine against int8-quantized vectors. Separate channels carry **relations**
@@ -240,6 +253,10 @@ How to read this:
 - **Levers if you need smaller/faster:** `--grid 32x32` divides every vector cost by ~4;
   `--smoothing-rank 0` skips the SVD (faster builds, lower recall); skipping
   `--rerank-vectors` and embeddings keeps the engine pure and minimal.
+- **Typed grids change the arithmetic:** each grid's vocabulary costs dims × 4 bytes — a
+  3,072-dim meaning grid is 12 KB/word, a 768-dim identifier grid 3 KB/word. The
+  18k-document index above was rebuilt with `--grilles-typees` and verified in place:
+  12/12 identifier lookups at rank 1, 27–154 ms warm.
 - One-time shared artifacts: the optional embedding table is **84 MB** (built locally by
   `scripts/prepare_potion.py`, shared across all indexes).
 - Belief memory: ~1 ms per assert/read, **82 MB per 50,000 facts** (measured,
@@ -280,7 +297,7 @@ roadmap.
 ## Project status
 
 **v0.1 — early.** Extracted from a private codebase where it was built and benchmarked
-against real business corpora (thousands of real documents, ~500 tests, measured research
+against real business corpora (thousands of real documents, ~540 tests, measured research
 notes in `research/`). Day-to-day production usage is just beginning: expect rough edges,
 and expect honest fixes.
 
@@ -311,8 +328,9 @@ static embeddings via model2vec distillation.
 
 ## Design principles
 
-1. **Deterministic or explicit.** Same input, same output, any machine. What cannot be
-   guaranteed is stated, never silently degraded.
+1. **Deterministic or explicit.** Same input, same ranking, any machine — and bit-for-bit
+   reproducible on the same machine. What cannot be guaranteed (float decimals across
+   BLAS implementations) is stated, never silently degraded.
 2. **The engine recalls, the caller judges.** Scores, margins, provenance and explanations
    are always exposed; ambiguity raises a flag instead of a silent guess.
 3. **Parameters describe *your world*, never the geometry.** Profiles configure roles,
@@ -325,7 +343,7 @@ static embeddings via model2vec distillation.
 
 ```bash
 pip install -e ".[dev]"
-pytest -q            # ~500 tests, two CI regimes (with and without optional extras)
+pytest -q            # ~540 tests, two CI regimes (with and without optional extras)
 ruff check && ruff format
 ```
 
