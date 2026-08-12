@@ -162,8 +162,14 @@ class Profiles:
                 raise RuntimeError("finalize() doit être appelé avant word_vector()")
             if self.acc[idx].any():
                 prof = self.acc[idx].astype(np.float32)
-                prof /= np.float32(np.linalg.norm(prof))
-                parts.append((b, prof))
+                # Garde explicite : après finalize (PPMI+SVD), une ligne peut porter des
+                # valeurs subnormales dont la norme float32 SOUS-DÉBORDE à 0 alors que
+                # .any() est vrai — diviser produirait inf, puis NaN à la normalisation
+                # finale, silencieusement propagés jusqu'à la matrice int8 (« déterministe
+                # ou explicite » : un profil dégénéré est écarté, jamais empoisonné).
+                nprof = np.float32(np.linalg.norm(prof))
+                if nprof > 0.0:
+                    parts.append((b, prof / nprof))
         if embed is not None:
             parts.append((g, embed))
         total = sum(w for w, _ in parts)

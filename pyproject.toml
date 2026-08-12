@@ -8,7 +8,10 @@ version = "0.1.0"
 description = "Indexation sémantique par mosaïques hyperdimensionnelles — locale, déterministe, sans LLM"
 requires-python = ">=3.12"
 license = {text = "Apache-2.0"}
-dependencies = ["numpy==2.4.6"]
+# Runtime : plancher + plafond majeur — un paquet publié épinglé au patch devient
+# ininstallable avec le temps ; la reproductibilité exacte reste garantie côté dev/CI
+# (extras épinglés ci-dessous), pas imposée aux environnements des utilisateurs.
+dependencies = ["numpy>=2.4,<3"]
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1", "ruff==0.16.2", "ty==0.0.69", "import-linter==2.13", "pre-commit"]
@@ -41,3 +44,10 @@ select = ["E4", "E7", "E9", "F", "RUF100"]
 # actif — jamais les deux. Rendre "unused-ignore-comment" bloquant condamnerait le motif à
 # n'être vert que dans un seul des deux environnements. On le rétrograde donc en silencieux.
 unused-ignore-comment = "ignore"
+
+[tool.pytest.ini_options]
+# RuntimeWarning = ERREUR : un warning numérique (division par zéro, cast invalide) est
+# un NaN/inf en puissance qui traverse silencieusement jusqu'à la matrice de recherche —
+# vécu (profils subnormaux post-SVD, 12/08). « Déterministe ou explicite » vaut aussi
+# pour la CI : le poison numérique casse le build, jamais le classement.
+filterwarnings = ["error::RuntimeWarning"]

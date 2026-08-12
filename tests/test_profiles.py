@@ -234,3 +234,23 @@ def test_finalize_weighting_invalide_leve_valueerror():
         raise AssertionError("aurait dû lever ValueError")
     except ValueError:
         pass
+
+
+def test_word_vector_profil_degenere_reste_fini():
+    """Un profil dont la norme float32 SOUS-DÉBORDE à 0 (valeurs subnormales — l'état
+    que PPMI+SVD peut laisser) ne doit produire ni inf ni NaN : la composante profil
+    est écartée proprement, la signature porte seule le vecteur. Racine des warnings
+    « divide by zero » (profiles.py) et « invalid value in cast » (encoder.py)."""
+    import numpy as np
+
+    from mosaic.profiles import Profiles
+
+    p = Profiles(48)
+    p.learn(["alpha", "beta", "alpha", "gamma"])
+    p.finalize("ppmi")
+    row = p.rows["alpha"]
+    p.acc[row] = np.full(p.dim, 1e-30, dtype=np.float32)  # .any() vrai, norme -> 0.0
+    assert p.acc[row].any() and float(np.linalg.norm(p.acc[row])) == 0.0
+    v = p.word_vector("alpha")
+    assert np.isfinite(v).all(), "le vecteur doit rester fini (ni inf ni NaN)"
+    assert float(np.linalg.norm(v)) > 0.0
