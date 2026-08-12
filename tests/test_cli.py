@@ -640,14 +640,14 @@ def test_build_index_paths_defaut_on_trouve_par_nom_fichier(tmp_path):
     idx = str(tmp_path / "idx")
     r = _run("build", str(_corpus_nomme(tmp_path)), "-o", idx, "--grid", "32x32")
     assert r.returncode == 0, r.stderr
-    r = _run("search", "pomme", idx, "--top", "1")
+    r = _run("search", "kumquat", idx, "--top", "1")
     hits = json.loads(r.stdout)
     assert "KUMQUAT" in hits[0]["id"]
-    assert hits[0]["score"] > 0.3  # match net (contenu ne mentionne jamais « pomme »)
+    assert hits[0]["score"] > 0.3  # match net (contenu ne mentionne jamais « kumquat »)
 
 
 def test_build_no_path_tokens_score_bien_plus_faible(tmp_path):
-    """--no-path-tokens : « pomme » reste un token jamais appris (OOV) — seul un
+    """--no-path-tokens : « kumquat » reste un token jamais appris (OOV) — seul un
     résidu de bruit de signature de hachage subsiste (voir test_index.py pour la
     même mesure au niveau API : présence dans le top-k n'est pas discriminante sur
     un corpus minuscule, l'écart de score l'est)."""
@@ -659,12 +659,12 @@ def test_build_no_path_tokens_score_bien_plus_faible(tmp_path):
 
     score_on = next(
         h["score"]
-        for h in json.loads(_run("search", "pomme", idx_on, "--top", "2").stdout)
+        for h in json.loads(_run("search", "kumquat", idx_on, "--top", "2").stdout)
         if "KUMQUAT" in h["id"]
     )
     score_off = next(
         h["score"]
-        for h in json.loads(_run("search", "pomme", idx_off, "--top", "2").stdout)
+        for h in json.loads(_run("search", "kumquat", idx_off, "--top", "2").stdout)
         if "KUMQUAT" in h["id"]
     )
     assert score_on > 5 * score_off

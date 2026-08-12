@@ -314,8 +314,8 @@ def test_tools_call_chemin_et_erreur_sans_relations(tmp_path):
     """mosaic_chemin traverse quand l'index a le canal relations ; erreur claire sinon."""
     c = tmp_path / "corpus"
     for chemin, texte in [
-        ("IBIS/2026/note_a.md", "eclairage led ibis"),
-        ("IBIS/2026/note_b.md", "reception travaux ibis"),
+        ("RIVIERA/2026/note_a.md", "eclairage led riviera"),
+        ("RIVIERA/2026/note_b.md", "reception travaux riviera"),
     ]:
         f = c / chemin
         f.parent.mkdir(parents=True, exist_ok=True)
@@ -324,14 +324,16 @@ def test_tools_call_chemin_et_erreur_sans_relations(tmp_path):
     Index.build(c, tmp_path / "index_compta", grid=GRID)  # SANS relations
     state = mcp.new_state(tmp_path)
     result, data = _call(
-        state, "mosaic_chemin", {"doc_id": "IBIS/2026/note_a.md", "domaine": "devis"}
+        state, "mosaic_chemin", {"doc_id": "RIVIERA/2026/note_a.md", "domaine": "devis"}
     )
     assert not result["isError"]
     dossier = next(g for g in data if g["role"] == "dossier")
-    assert {d["id"] for d in dossier["documents"]} == {"IBIS/2026/note_b.md"}
+    assert {d["id"] for d in dossier["documents"]} == {"RIVIERA/2026/note_b.md"}
     # index sans relations : erreur d'exécution lisible, pas un crash protocole
     result2, _ = _call(
-        state, "mosaic_chemin", {"doc_id": "IBIS/2026/note_a.md", "domaine": "compta"}
+        state,
+        "mosaic_chemin",
+        {"doc_id": "RIVIERA/2026/note_a.md", "domaine": "compta"},
     )
     assert result2["isError"]
     assert "relations" in result2["content"][0]["text"]

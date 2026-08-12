@@ -327,7 +327,9 @@ def main() -> int:
         print(
             f"CRITÈRE DU BRIEFING ATTEINT pour σ ∈ {gagnants} — à confirmer à l'étape 2"
         )
-        print("(capacité de superposition) et à discuter avec l'auteur avant toute greffe.")
+        print(
+            "(capacité de superposition) et à discuter avec l'auteur avant toute greffe."
+        )
     else:
         print(
             "Critère du briefing NON atteint sur ce banc — résultats posés pour DISCUSSION"

@@ -211,7 +211,7 @@ def test_search_like_fichier_externe_ignore_les_tokens_du_nom(tmp_path):
     """Contrat spec §A : « path tokens NOT injected for a query-document — it's une
     requête ». Un doc interne nommé ...KUMQUAT... est électrique ; la requête externe
     nommée KUMQUAT_... est en fait de la plomberie. Si les tokens de chemin de la requête
-    étaient (à tort) injectés, "pomme" tirerait le score vers le doc électrique malgré un
+    étaient (à tort) injectés, "kumquat" tirerait le score vers le doc électrique malgré un
     contenu totalement différent."""
     c = tmp_path / "corpus"
     c.mkdir()
@@ -222,7 +222,9 @@ def test_search_like_fichier_externe_ignore_les_tokens_du_nom(tmp_path):
         "chauffe-eau ballon eau chaude raccordement cuivre", encoding="utf-8"
     )
     idx = Index.build(c, tmp_path / "idx", grid=GRID)
-    assert "pomme" in idx.profiles.rows  # confirmé injecté au vocabulaire via le BUILD
+    assert (
+        "kumquat" in idx.profiles.rows
+    )  # confirmé injecté au vocabulaire via le BUILD
 
     external = tmp_path / "KUMQUAT_nouveau_chantier.md"
     external.write_text("chauffe-eau ballon eau chaude raccordement", encoding="utf-8")
