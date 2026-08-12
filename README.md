@@ -206,9 +206,11 @@ had to earn its truth, and the measures of that journey ship in <code>research/<
 Around that core, the other tiles: **BM25 postings** over the same token stream
 (`--hybride`); a **semantic atlas** (`--atlas`) — a SOM learned from the co-occurrence
 profiles, so neighboring cells hold related tokens, whose document heatmaps form a
-4th fusion channel with errors decorrelated from the grid's; **relations**
-(hyperdimensional binding by circular permutation) for graph hops; the **belief
-memory** (bipolar MAP vectors) with conformal calibration.
+4th fusion channel with errors decorrelated from the grid's; a **grammatical channel**
+(`--grammatical`) — rule-produced roles bound to token signatures by the same circular
+permutation as relations, a few structural traces per document with abstention over
+guessing; **relations** (hyperdimensional binding by circular permutation) for graph
+hops; the **belief memory** (bipolar MAP vectors) with conformal calibration.
 
 Determinism, stated precisely: on a given machine, the same corpus produces the same
 index bit for bit; across machines, the int8-quantized search matrix is provably
@@ -238,9 +240,12 @@ human-mode explanations are bilingual (`--langue en`).
 
 ## Limitations — the honest list
 
-- **Bag-of-words semantics.** Word order beyond learned collocations is not encoded; a
-  large transformer will beat it on subtle nuance — that is the price of sovereignty,
-  and the reranker narrows it.
+- **Bag-of-words semantics at the core.** General word order is not encoded; a large
+  transformer will beat it on subtle nuance — that is the price of sovereignty. Two
+  named exceptions narrow specific failures without changing the nature of the engine:
+  learned collocations, and the opt-in grammatical channel, which deposits a few
+  high-value structural *traces* (negation scope, upstream/downstream, agent/patient)
+  — traces, not sentence reconstruction.
 - **Linear scan latency.** Search is a full-corpus cosine: excellent up to tens of
   thousands of documents (63 ms @ 18k docs warm), not designed for millions — and the
   measured sub-linear shortcut (pyramid prefilter) failed its bench, so we did not
@@ -253,7 +258,7 @@ human-mode explanations are bilingual (`--langue en`).
 ## Project status
 
 **v0.1 — early.** Extracted from a private codebase where it was built and benchmarked
-against real business corpora (thousands of real documents, ~550 tests, measured
+against real business corpora (thousands of real documents, ~590 tests, measured
 research notes in `research/`). Day-to-day production usage is just beginning: expect
 rough edges, and expect honest fixes.
 
@@ -298,7 +303,7 @@ model2vec distillation.
 
 ```bash
 pip install -e ".[dev]"
-pytest -q            # ~550 tests, two CI regimes (with and without optional extras)
+pytest -q            # ~590 tests, two CI regimes (with and without optional extras)
 ruff check && ruff format
 ```
 
