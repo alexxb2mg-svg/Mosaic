@@ -107,6 +107,27 @@ mechanism. Five measured steps:
    (the prototype's SOM had ingested UUID path noise; the gap is explained, not
    mysterious). Nothing is lost to int8 quantization of the maps.
 
+## The semantic diff (planted bench)
+
+Two deterministic builds of the same corpus are bit-comparable, so their difference is
+a semantic object. Validated on a planted bench (`research/diff_semantique.py`,
+predictions declared before measurement):
+
+- **P1, specificity** — identical corpora yield a *strictly* empty diff (an
+  exact-equality fast path carries the contract: without it, a float cosine turns the
+  guaranteed zero into 1e-13).
+- **P2, sensitivity** — substituting an ingredient in 6 documents: the new word
+  surfaces in the appeared vocabulary, the replaced word tops the usage declines at
+  −75%, and 70% of the top-10 context drift is the substitution's co-occurrence
+  neighborhood. Lesson learned on the first run: profile drift detects *context*
+  change, not frequency change — the df-based usage reading is a separate signal.
+- **P3, locality** — untouched documents far from the change drift 4.5× less than its
+  neighbors, and the context-drift ranking is semantically coherent (caramel, ganache,
+  mayonnaise: the neighbors of fat). The engine does not cry change everywhere.
+
+Shipped as `mosaic diff <t1> <t2>` (two corpus folders — ephemeral builds — or two
+index folders; mixed natures and mismatched encoding spaces are refused loudly).
+
 ## Reproduce
 
 ```bash

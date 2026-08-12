@@ -39,10 +39,15 @@ def versions_actuelles(
     k: int = 10,
     seuil_version: float = SEUIL_VERSION_DEFAUT,
     date_de: Callable[[str], str] = date_du_chemin,
+    **opts_recherche,
 ) -> list[dict]:
     """Renvoie les groupes de versions du top-k, chacun avec sa version CANONIQUE (la plus récente)
-    et ses versions PÉRIMÉES. Trié par score du document canonique."""
-    hits = idx.search(texte, k=k)
+    et ses versions PÉRIMÉES. Trié par score du document canonique.
+
+    `opts_recherche` est relayé tel quel à `idx.search` (rerank, type_filtre, recence,
+    fusion…) : `actuel` n'est plus un search amputé — un agent qui filtre par type en
+    recherche garde son filtre en vérité temporelle (audit CLI 12/08, finding 4)."""
+    hits = idx.search(texte, k=k, **opts_recherche)
     if not hits:
         return []
     ids = [h["id"] for h in hits]

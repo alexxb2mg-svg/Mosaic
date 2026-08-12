@@ -25,6 +25,7 @@ from typing import Any
 
 from mosaic import carte
 from mosaic.croyance import MemoireCroyance
+from mosaic.diff import diff_corpus, diff_indexes
 from mosaic.embeddings import Embeddings, prepare
 from mosaic.index import PROFILE_WEIGHTING_DEFAULT, SMOOTHING_RANK_DEFAULT, Index
 from mosaic.lexicon import load_lexicon
@@ -529,6 +530,38 @@ def _construire_parser() -> argparse.ArgumentParser:
         help="cosinus dans [0, 1] au-dessus duquel deux documents sont des versions du "
         "même aspect (date lue dans le nom de fichier AAAA-MM-JJ)",
     )
+    p_actuel.add_argument(
+        "--rerank",
+        action="store_true",
+        help="repêcheur sur la recherche sous-jacente (mêmes exigences que `search --rerank`)",
+    )
+    _ajouter_rerank_params(p_actuel)
+    p_actuel.add_argument(
+        "--type",
+        dest="type_filtre",
+        default=None,
+        help="facette : même filtre de type exact que `search --type`",
+    )
+    p_actuel.add_argument(
+        "--recence",
+        type=float,
+        default=0.0,
+        help="facette : même fusion de fraîcheur que `search --recence`",
+    )
+
+    p_diff = ajouter(
+        "diff",
+        "diff SÉMANTIQUE entre deux états d'un corpus — ce qui a changé de sens, "
+        "pas seulement de contenu",
+    )
+    p_diff.add_argument(
+        "avant", help="état t1 : dossier de CORPUS (build éphémère) ou d'INDEX"
+    )
+    p_diff.add_argument(
+        "apres",
+        help="état t2 : même nature que `avant` (corpus avec corpus, index avec index)",
+    )
+    _ajouter_top(p_diff, defaut=20)
 
     p_meta = ajouter(
         "meta", "méta-recherche : plusieurs index fusionnés par rangs (RRF)"
@@ -942,14 +975,49 @@ def _cmd_proches(args) -> int:
 def _cmd_actuel(args) -> int:
     _parse_int_positive(args.top, "top")
     seuil = _parse_cos_01(args.seuil_version, "seuil-version")
+    rerank_lambda = _parse_rerank_lambda(args.rerank_lambda)
+    rerank_depth = _parse_rerank_depth(args.rerank_depth)
     idx = _ouvrir_index(Path(args.index), verify_embeddings=False)
-    resultats = versions_actuelles(idx, args.query, k=args.top, seuil_version=seuil)
+    resultats = versions_actuelles(
+        idx,
+        args.query,
+        k=args.top,
+        seuil_version=seuil,
+        rerank=args.rerank,
+        rerank_lambda=rerank_lambda,
+        rerank_depth=rerank_depth,
+        type_filtre=args.type_filtre,
+        recence=args.recence,
+    )
     # Socle de sortie : tout résultat classé porte `id` — `canonique` reste en alias
     # (compat) mais les agents peuvent parser uniformément (audit finding 27).
     for r in resultats:
         if "canonique" in r:
             r.setdefault("id", r["canonique"])
     _out(resultats)
+    return 0
+
+
+def _cmd_diff(args) -> int:
+    _parse_int_positive(args.top, "top")
+    avant, apres = Path(args.avant), Path(args.apres)
+    est_index_a = (avant / "docs.msei").is_file()
+    est_index_b = (apres / "docs.msei").is_file()
+    if est_index_a != est_index_b:
+        raise ValueError(
+            "diff : comparer un corpus avec un index n'a pas de sens — donner deux "
+            "dossiers de corpus (build éphémère) ou deux dossiers d'index"
+        )
+    if est_index_a:
+        ia = _ouvrir_index(avant, verify_embeddings=False)
+        ib = _ouvrir_index(apres, verify_embeddings=False)
+        _out(diff_indexes(ia, ib, top=args.top))
+        return 0
+    if not avant.is_dir() or not apres.is_dir():
+        raise ValueError(
+            f"dossier introuvable : {avant if not avant.is_dir() else apres}"
+        )
+    _out(diff_corpus(avant, apres, top=args.top))
     return 0
 
 
@@ -1112,6 +1180,7 @@ _COMMANDES = {
     "carte": _cmd_carte,
     "proches": _cmd_proches,
     "actuel": _cmd_actuel,
+    "diff": _cmd_diff,
     "meta": _cmd_meta,
     "calibrer": _cmd_calibrer,
     "profil": _cmd_profil,
