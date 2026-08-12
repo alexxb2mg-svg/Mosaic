@@ -6,11 +6,13 @@ No cloud, no GPU, no per-query bill, no data ever leaving your machine. On a giv
 machine, the same corpus always produces the same index, bit for bit; across machines,
 the int8-quantized search matrix is provably identical (BLAS float variance is absorbed
 by quantization — measured, see below), while float artifacts may differ in inert
-decimals. Every document becomes a small **64×64 color grid** — a mosaic — and searching
-means comparing grids: two texts about the same thing get two grids that are
-geometrically close.
+decimals. Every document becomes a small **color grid** — a mosaic — and searching means
+comparing grids: two texts about the same thing get two grids that are geometrically
+close. The geometry is not fixed dogma: 64×64×3 by default, and with typed grids each
+kind of data (meaning, identifiers, paths) gets its own grid, sized to its own
+vocabulary.
 
-<p align="center"><img src="docs/grid_example.png" width="256" alt="A document, as Mosaic sees it: a 64x64 color grid"><br><em>A real document from the bundled benchmark, as the engine sees it.</em></p>
+<p align="center"><img src="docs/grid_example.png" width="256" alt="A document, as Mosaic sees it: a color grid"><br><em>A real document from the bundled benchmark, as the engine sees it.</em></p>
 
 ## The idea
 
@@ -213,11 +215,13 @@ mosaic build ./docs -o ./index --embeddings <table.msee> --abtt 2 --rerank-vecto
 
 ## How it works
 
-Each document is encoded into a **12,288-dimension grid** (64×64×3, the default geometry —
-typed grids size each grid to its own vocabulary instead) that superposes three
+Each document is encoded into a color grid — **12,288 dimensions (64×64×3) by default**;
+with typed grids, each grid is sized to its own vocabulary within the (c,c,3) family, so
+every grid still renders as a mosaic. The grid superposes three
 channels: a deterministic SHA-seeded **signature** per token, a **co-occurrence profile**
 learned from *your* corpus (PPMI + truncated SVD), and optionally a static **embedding**.
-Search is a cosine against int8-quantized vectors. Separate channels carry **relations**
+Search is a cosine against int8-quantized vectors — one reading per grid on a typed
+index, synthesized by the query's idf mass. Separate channels carry **relations**
 (hyperdimensional binding by circular permutation) and the **belief memory** (bipolar MAP
 vectors). Everything is seeded, integer-quantized, and reproducible — the int8 quantization
 provably absorbs cross-machine BLAS variance (measured: 0 changed values out of 24.5M).
@@ -251,8 +255,10 @@ How to read this:
 - **Latency scales linearly with corpus size** (int8 cosine over all documents). The MCP
   server keeps indexes open (warm path); the CLI pays Python startup on every call.
 - **Levers if you need smaller/faster:** `--grid 32x32` divides every vector cost by ~4;
-  `--smoothing-rank 0` skips the SVD (faster builds, lower recall); skipping
-  `--rerank-vectors` and embeddings keeps the engine pure and minimal.
+  on structured corpora `--grilles-typees` shrinks the meaning grid 4× *and* improves
+  identifier lookup (measured above); `--smoothing-rank 0` skips the SVD (faster builds,
+  lower recall); skipping `--rerank-vectors` and embeddings keeps the engine pure and
+  minimal.
 - **Typed grids change the arithmetic:** each grid's vocabulary costs dims × 4 bytes — a
   3,072-dim meaning grid is 12 KB/word, a 768-dim identifier grid 3 KB/word. The
   18k-document index above was rebuilt with `--grilles-typees` and verified in place:
