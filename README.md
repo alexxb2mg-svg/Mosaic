@@ -14,8 +14,9 @@ and where a standard tool wins, the benches below say so in print.
 
 What the name promises is the only originality claimed: an *assembly*. Not one clever
 algorithm but several complementary retrieval processes — a semantic grid learned from
-your corpus, exact lexical postings, static embeddings, a learned semantic atlas —
-each one measured, kept only where it wins, fused only where fusion wins, and
+your corpus, exact lexical postings, static embeddings, a learned semantic atlas, a
+deterministic grammatical channel — each one measured, kept only where it wins, fused
+only where fusion wins, and
 calibrated on *your* corpus rather than on doctrine. The same corpus produces the same
 index and the same ranking, on any machine, and no data ever leaves yours.
 
