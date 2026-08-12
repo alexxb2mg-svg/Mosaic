@@ -324,7 +324,8 @@ class Index:
                 for i, (_doc_id, tokens) in enumerate(docs)
             ]
             docs = [
-                (doc_id, flux["sens"]) for (doc_id, _t), flux in zip(docs, flux_par_doc)
+                (doc_id, flux["sens"])
+                for (doc_id, _t), flux in zip(docs, flux_par_doc, strict=True)
             ]
             vocab_sens = len({t for f in flux_par_doc for t in f["sens"]})
             dim = typage_module.dim_effective(
@@ -364,7 +365,7 @@ class Index:
             bm25 = Bm25.from_docs(
                 [
                     (doc_id, [t for typ in sorted(flux) for t in flux[typ]])
-                    for (doc_id, _s), flux in zip(docs, flux_par_doc)
+                    for (doc_id, _s), flux in zip(docs, flux_par_doc, strict=True)
                 ]
             )
         else:

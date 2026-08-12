@@ -382,10 +382,13 @@ def _parse_sparse_block(
 
     pair_counts = {
         (int(r), int(c)): float(w)
-        for r, c, w in zip(rows_arr.tolist(), cols_arr.tolist(), poids_arr.tolist())
+        for r, c, w in zip(
+            rows_arr.tolist(), cols_arr.tolist(), poids_arr.tolist(), strict=True
+        )
     }
     marginals = {
-        int(r): float(w) for r, w in zip(marg_rows_arr.tolist(), marg_arr.tolist())
+        int(r): float(w)
+        for r, w in zip(marg_rows_arr.tolist(), marg_arr.tolist(), strict=True)
     }
     return pair_counts, marginals, float(total_mass)
 
