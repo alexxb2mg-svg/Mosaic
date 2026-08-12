@@ -57,6 +57,7 @@ VERITE = Path(sys.argv[2]) if len(sys.argv) > 2 else RACINE / "bench" / "verite.
 K_EVAL = 10
 SMOOTHING = 300
 SEUIL_VOCAB_LISSAGE = 350  # en-deçà, rang 300 n'a pas de sens (vocab minuscule)
+DF_MAX_IDENTIFIANT = 3  # un token « ref » présent dans <= 3 docs est un identifiant
 TERMES_LEXICAUX = 4
 # configurations : nom -> dims par grille (le témoin « melange » = une seule grille)
 CONFIGS: dict[str, dict[str, int]] = {
@@ -168,9 +169,18 @@ class MoteurTypes:
         return d
 
     def classer(self, tokens: list[str], mode: str) -> list[int]:
-        """Classement des documents (indices) — `mode` : 'ponderee' ou 'rrf'."""
+        """Classement des documents (indices) — `mode` : 'ponderee', 'rrf' ou 'priorite'.
+
+        `priorite` (leçon du banc produits) : quand la requête contient des tokens de
+        type « ref », la lecture de la grille ref a PRÉSÉANCE lexicographique — le
+        porteur de l'identifiant passe devant, la pondération ne départage que le
+        reste. C'est la sémantique du boost réf des facettes, mais réalisée DANS la
+        représentation : possible uniquement parce que la lecture ref est isolée —
+        la grille mélangée ne peut pas le faire."""
         n_docs = next(iter(self.mats.values())).shape[0]
         canaux: list[tuple[float, np.ndarray]] = []
+        cos_ref: np.ndarray | None = None
+        ref_identifiant = False
         for t, qtoks in self._flux_requete(tokens).items():
             if not qtoks:
                 continue
@@ -184,9 +194,28 @@ class MoteurTypes:
                 continue
             masse = sum(self.profils[t].idf(x) for x in qtoks)
             canaux.append((masse, cos))
+            if t == "ref":
+                cos_ref = cos
+                # la préséance ne vaut que pour un IDENTIFIANT (rare par définition,
+                # df<=3) — un descripteur technique partagé (u1000r2v, présent dans des
+                # dizaines de désignations) ressemble à une réf mais n'identifie rien :
+                # lui donner la préséance vole le rang aux bons documents (mesuré).
+                ref_identifiant = all(
+                    self.profils[t].df.get(x, 0) <= DF_MAX_IDENTIFIANT for x in qtoks
+                )
         if not canaux:
             return list(range(min(K_EVAL, n_docs)))
-        if mode == "ponderee":
+        if mode == "priorite" and cos_ref is not None and ref_identifiant:
+            total = sum(m for m, _ in canaux)
+            reste = np.zeros(n_docs, dtype=np.float64)
+            for masse, cos in canaux:
+                reste += (masse / total) * cos.astype(np.float64)
+            # lexicographique VRAI (np.lexsort, dernière clé = primaire) : rang par
+            # cos_ref d'abord (quantifié pour absorber le bruit numérique), le score
+            # pondéré ne départage qu'à cos_ref égal
+            ordre = np.lexsort((-reste, -np.round(cos_ref.astype(np.float64), 4)))
+            return list(ordre[:K_EVAL])
+        if mode in ("ponderee", "priorite"):  # priorite sans réf en requête -> ponderee
             total = sum(m for m, _ in canaux)
             score = np.zeros(n_docs, dtype=np.float64)
             for masse, cos in canaux:
