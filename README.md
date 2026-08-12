@@ -76,16 +76,16 @@ Pick by terrain — and know the bill before you flip a flag:
 ```mermaid
 flowchart TD
     Q{"What does your corpus look like?"}
-    Q -->|"prose, paraphrase-heavy queries"| A["default grid + embeddings + rerank, no fusion"]
-    Q -->|"lexical Q&A: queries reuse the docs' vocabulary"| B["--hybride --atlas at build, --fusion at search"]
-    Q -->|"dense in identifiers (catalogs, part numbers)"| C["--grilles-typees + --rerank-vectors"]
+    Q -->|"prose, paraphrase-heavy queries"| A["default grid + embeddings + rerank, no fusion — disk 48 KB/word + 12 KB/doc, RAM 370 MB @ 18k docs, 27-63 ms/query, build minutes (nightly)"]
+    Q -->|"lexical Q&A: queries reuse the docs' vocabulary"| B["--hybride --atlas at build, --fusion at search — same + a few MB postings + 4.5 KB/doc, 29 ms/query, build adds a SOM (minutes, a few GB RAM at 70k+ words)"]
+    Q -->|"dense in identifiers (catalogs, part numbers)"| C["--grilles-typees + --rerank-vectors — often CHEAPER: meaning grid up to 4x smaller, identifier grids 3 KB/word, same latency"]
     Q -->|"code"| U["not measured yet: run the benches, tell us"]
     A --> T{"Folder evolves over time?"}
     B --> T
     C --> T
-    T -->|"yes"| V["add mosaic actuel: stale versions get flagged"] --> M
+    T -->|"yes"| V["add mosaic actuel — free, reads stored facets"] --> M
     T -->|"no"| M{"Machine budget tight?"}
-    M -->|"yes"| S["--grid 32x32 divides every vector cost by 4, --smoothing-rank 0 skips the SVD, skip optional extras"] --> DONE
+    M -->|"yes"| S["--grid 32x32: everything /4 (3 KB/doc, 12 KB/word) — --smoothing-rank 0: skip the SVD, faster build, lower recall — skip extras: pure numpy"] --> DONE
     M -->|"no"| DONE["build, then let measurement tune it: mosaic calibrer + your ground truth"]
 ```
 
