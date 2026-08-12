@@ -645,13 +645,13 @@ def _corpus_nomme(tmp_path: Path) -> Path:
 def test_index_paths_defaut_true_trouve_par_nom_de_fichier(tmp_path):
     idx = Index.build(_corpus_nomme(tmp_path), tmp_path / "idx", grid=GRID)
     assert idx.index_paths is True
-    hits = idx.search("pomme", k=1)
+    hits = idx.search("kumquat", k=1)
     assert "KUMQUAT" in hits[0]["id"]
-    assert hits[0]["score"] > 0.3  # match net (contenu ne mentionne jamais « pomme »)
+    assert hits[0]["score"] > 0.3  # match net (contenu ne mentionne jamais « kumquat »)
 
 
 def test_no_path_tokens_score_bien_plus_faible_sans_injection(tmp_path):
-    """Sans injection, « pomme » reste un token jamais appris (OOV) : seul un résidu
+    """Sans injection, « kumquat » reste un token jamais appris (OOV) : seul un résidu
     de bruit de signature de hachage subsiste, sans commune mesure avec le match
     net obtenu quand l'injection est active (k=5 == tout le corpus : la présence
     dans les résultats n'est donc pas discriminante ici, l'écart de score l'est)."""
@@ -660,10 +660,10 @@ def test_no_path_tokens_score_bien_plus_faible_sans_injection(tmp_path):
         _corpus_nomme(tmp_path), tmp_path / "idx_off", grid=GRID, index_paths=False
     )
     score_on = next(
-        h["score"] for h in idx_on.search("pomme", k=5) if "KUMQUAT" in h["id"]
+        h["score"] for h in idx_on.search("kumquat", k=5) if "KUMQUAT" in h["id"]
     )
     score_off = next(
-        h["score"] for h in idx_off.search("pomme", k=5) if "KUMQUAT" in h["id"]
+        h["score"] for h in idx_off.search("kumquat", k=5) if "KUMQUAT" in h["id"]
     )
     assert score_on > 5 * score_off
 
@@ -674,13 +674,13 @@ def test_index_paths_false_saute_totalement_linjection(tmp_path):
     idx = Index.build(
         _corpus_nomme(tmp_path), tmp_path / "idx", grid=GRID, index_paths=False
     )
-    assert "pomme" not in idx.profiles.rows
+    assert "kumquat" not in idx.profiles.rows
     assert "d26080003" not in idx.profiles.rows
 
 
 def test_index_paths_true_ajoute_les_tokens_du_chemin_au_vocabulaire(tmp_path):
     idx = Index.build(_corpus_nomme(tmp_path), tmp_path / "idx", grid=GRID)
-    assert "pomme" in idx.profiles.rows
+    assert "kumquat" in idx.profiles.rows
 
 
 def test_no_path_tokens_bit_identique_deux_builds(tmp_path):
@@ -821,16 +821,16 @@ def test_excluded_dirs_profondeur_quelconque(tmp_path):
 # -- v1.5 : critère d'acceptation (mini-corpus nommé, intégration) --------------------------
 
 
-def test_critere_pomme_top3_et_aucun_backup_apres_reconstruction(tmp_path):
+def test_critere_kumquat_top3_et_aucun_backup_apres_reconstruction(tmp_path):
     corpus = _corpus_nomme(tmp_path)
     piege = corpus / "_backups"
     piege.mkdir()
     (piege / "D26089903_KUMQUAT_devis_old.md").write_text(
-        "ancien brouillon pomme fourniture pose", encoding="utf-8"
+        "ancien brouillon kumquat fourniture pose", encoding="utf-8"
     )
 
     idx = Index.build(corpus, tmp_path / "idx", grid=GRID)
-    hits = idx.search("le devis pomme", k=3)
+    hits = idx.search("le devis kumquat", k=3)
 
     ids = [h["id"] for h in hits]
     assert any("KUMQUAT" in i for i in ids)
