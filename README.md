@@ -15,6 +15,28 @@ embedded in tool descriptions: your agent sees five lines of JSON instead of tho
 of tokens of raw files — and **human-usable**: a plain CLI, explanations on demand
 (`explain`, `--explique`), nothing you cannot run and read yourself.
 
+## What this is — read this first
+
+Mosaic is one practitioner's answer to one practitioner's constraints: a small
+business's documents made searchable by meaning, with no cloud, no GPU, no per-query
+bill, and results that can be trusted because they can be reproduced. It does not claim
+to reinvent retrieval. The mechanisms are textbook — co-occurrence statistics in the
+LSA lineage, hyperdimensional computing, BM25, self-organizing maps, rank fusion — and
+where a standard tool wins, the benches below say so in print.
+
+So take it first as a **didactic experiment**: an engine assembled from measurable
+parts, every design decision settled by a bench you can rerun, the dead ends documented
+next to the wins. It does run in production here, and if your constraints resemble the
+author's — local-first, deterministic, French-heavy corpora, agents in the loop — it
+may serve you as a tool too. But the honest frame is a working lesson in building
+sovereign semantic search, not the announcement of a revolutionary product.
+
+Contributions from professionals of the field are warmly welcome, and understood
+accordingly: corrections, measures, stronger baselines, proofs that a design choice is
+wrong. They feed an educational resource more than a product roadmap — if you can beat
+a number in this README on its own bench, that result belongs here, whichever way it
+points.
+
 ## The idea
 
 The engine does everything **mechanical**: index, retrieve, remember, and *measure its
