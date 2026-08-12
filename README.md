@@ -159,15 +159,41 @@ included. The same three-channel fusion that wins outright on Alloprof *loses* o
 paraphrase-heavy private corpus: it gains +2.5 pts of recall but drops 4 pts of MRR and
 divides the semantic-trap MRR by three (0.153 solo vs 0.051 fused). A rank fusion
 averages its channels' opinions; on lexical terrain that averages toward the truth, on
-semantic terrain it dilutes exactly the wins the grid exists for. Pick by terrain:
+semantic terrain it dilutes exactly the wins the grid exists for. Pick by terrain — and
+know the bill before you flip a flag:
 
-| Your corpus looks like | Measured best setup | Evidence |
-|---|---|---|
-| Prose documents, paraphrase-heavy queries (knowledge bases, notes, procedures) | default grid + embeddings + `--rerank` — **no fusion** | private real-corpus bench: solo beats every fusion on MRR-semantic ×3; bundled bench 11/12 top-1 |
-| Lexical Q&A — queries reuse the documents' own vocabulary (FAQ, homework, tickets) | three-channel fusion (`--hybride` + `--fusion`) | Alloprof 2,556 docs: 0.517 R@10 vs 0.498 standard hybrid, 0.482 best single |
-| Catalogs and records dense in identifiers (products, part numbers, case files) | `--grilles-typees` (+ `--rerank-vectors`) | product bench: drowned ref 0.90 vs 0.825, bare ref 0.9917 with rerank |
-| Folders that evolve over time, where stale versions are a trap | any of the above + `mosaic actuel` | temporal-truth bench (stale version ranked first by flat search, flagged by `actuel`) |
-| Code repositories | **unknown — not measured yet** | open question; identifier-dense (typed grids are a candidate), but code has structure none of our benches cover |
+```mermaid
+flowchart TD
+    Q{"What does your corpus<br/>look like?"}
+    Q -->|"prose, paraphrase-heavy<br/>queries"| A["default grid + embeddings<br/>+ --rerank — <b>no fusion</b>"]
+    Q -->|"lexical Q&A — queries reuse<br/>the docs' vocabulary"| B["--hybride at build<br/>--fusion at search"]
+    Q -->|"dense in identifiers<br/>(catalogs, part numbers)"| C["--grilles-typees<br/>+ --rerank-vectors"]
+    Q -->|"code"| U["not measured yet —<br/>run the benches, tell us"]
+    A --> T{"Folder evolves<br/>over time?"}
+    B --> T
+    C --> T
+    T -->|"yes"| V["add mosaic actuel<br/>(stale versions get flagged)"] --> M
+    T -->|"no"| M{"Machine budget<br/>tight?"}
+    M -->|"yes"| S["--grid 32x32: ÷4 every vector cost<br/>--smoothing-rank 0: skip the SVD<br/>skip optional extras"] --> DONE
+    M -->|"no"| DONE["build, then let measurement tune it:<br/>mosaic calibrer + your ground truth"]
+```
+
+| Your corpus looks like | Measured best setup | Evidence | What it costs |
+|---|---|---|---|
+| Prose documents, paraphrase-heavy queries (knowledge bases, notes, procedures) | default grid + embeddings + `--rerank` — **no fusion** | private real-corpus bench: solo beats every fusion on MRR-semantic ×3; bundled bench 11/12 top-1 | disk ≈ vocab × 48 KB + 12 KB/doc; serving 18k docs ≈ 370 MB RAM, 27–63 ms warm; build is nightly-batch, its RAM grows with vocabulary (multi-GB beyond ~70k words); one shared 84 MB embedding table |
+| Lexical Q&A — queries reuse the documents' own vocabulary (FAQ, homework, tickets) | three-channel fusion (`--hybride` + `--fusion`) | Alloprof 2,556 docs: 0.517 R@10 vs 0.498 standard hybrid, 0.482 best single | the row above + BM25 postings (a few MB — an explicit word inventory of your docs: the privacy trade-off is yours) + 0.5 KB/doc rerank vectors; three scans per query, still milliseconds |
+| Catalogs and records dense in identifiers (products, part numbers, case files) | `--grilles-typees` (+ `--rerank-vectors`) | product bench: drowned ref 0.90 vs 0.825, bare ref 0.9917 with rerank | often *cheaper* than default: meaning grid up to 4× smaller when the vocabulary allows, identifier grids are tiny (768 dims ≈ 3 KB/word); same serving class |
+| Folders that evolve over time, where stale versions are a trap | any of the above + `mosaic actuel` | temporal-truth bench (stale version ranked first by flat search, flagged by `actuel`) | free — reads the facets the index already stores |
+| Code repositories | **unknown — not measured yet** | open question; identifier-dense (typed grids are a candidate), but code has structure none of our benches cover | — |
+
+One **research** channel sits outside this table: semantic-atlas heatmaps (a
+SOM-organized grid, `research/atlas_som.py` / `atlas_fusion.py` / `atlas_capacite.py`).
+Fused as a 4th channel with the trio it measured **+2.8 pts Recall@10 and +3.7 MRR on
+the full Alloprof corpus** (0.532 vs 0.503, both with this bench's canonical-token BM25
+channel) — its errors decorrelate from the flat grid's. The bill: a build-time SOM over
+the whole vocabulary (~4 GB RAM peak and ~20 min at 72k words, chunked) — and its
+pyramid-prefilter variant was measured dead (step 3, control included). It is not an
+engine flag yet: adopting it is an open engineering decision.
 
 Two rules fall out of this table. First: **measure on your own corpus** — 20–40
 ground-truth queries and the bundled benches (`bench/run_bench.py`,
