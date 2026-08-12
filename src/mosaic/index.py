@@ -357,7 +357,9 @@ class Index:
             # donc un search() juste après build() doit voir exactement la même précision
             # qu'un search() après Index.open() — jamais deux comportements pour le même index.
             rerank_vecs = _round_f16(rerank_module.encode_texts(rerank_texts))
-            rerank_model = rerank_module.MODEL_NAME
+            # Le nom du modèle RÉELLEMENT chargé (MOSAIC_POTION_MODEL_DIR compris) —
+            # la constante mentait quand l'env pointait un autre modèle (bug 12/08).
+            rerank_model = rerank_module.model_name_effectif()
         # Postings BM25 sur le MÊME flux de tokens que la grille (canonical + collocations,
         # chemins selon index_paths) : les deux canaux de la fusion voient le même monde.
         # Index typé : le flux complet est la réunion des flux par grille (le monde entier).

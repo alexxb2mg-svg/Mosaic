@@ -53,6 +53,22 @@ def _model_source() -> str:
     return MODEL_NAME
 
 
+def model_name_effectif() -> str:
+    """Le nom du modèle RÉELLEMENT chargé — celui que les métadonnées doivent porter.
+
+    Bug débusqué en mesure (12/08) : build écrivait la constante MODEL_NAME dans
+    rerank.msrv même quand MOSAIC_POTION_MODEL_DIR chargeait un AUTRE modèle — un
+    index construit avec un modèle 512d se déclarait « potion-multilingual-128M ».
+    Une métadonnée qui ment est pire qu'une métadonnée absente (« déterministe ou
+    explicite »). Règle : le répertoire local PAR DÉFAUT (data_externes/potion_model)
+    est par contrat un miroir du modèle canonique — seule la SURCHARGE env signale un
+    modèle différent."""
+    env = os.environ.get(_LOCAL_MODEL_DIR_ENV)
+    if env and Path(env).is_dir():
+        return f"local:{Path(env).name}"
+    return MODEL_NAME
+
+
 def _get_model():
     global _model
     if _model is None:

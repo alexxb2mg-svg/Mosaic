@@ -385,3 +385,17 @@ def test_add_rerank_encode_echoue_ne_laisse_pas_d_etat_partiel(tmp_path, monkeyp
     assert (
         idx.profiles.rows == vocab_avant
     )  # le vocabulaire n'a pas non plus appris "ballon" etc.
+
+
+def test_rerank_model_metadata_dit_le_modele_reellement_charge(tmp_path, monkeypatch):
+    """Bug 12/08 : build écrivait la constante MODEL_NAME dans rerank.msrv même quand
+    MOSAIC_POTION_MODEL_DIR chargeait un AUTRE modèle — un index 512d se déclarait
+    potion-multilingual-128M. La métadonnée doit dire le modèle RÉEL."""
+    _fake_model(monkeypatch)
+    autre = tmp_path / "mon_modele_512d"
+    autre.mkdir()
+    monkeypatch.setenv("MOSAIC_POTION_MODEL_DIR", str(autre))
+    idx = Index.build(
+        _corpus(tmp_path), tmp_path / "idx", grid=GRID, rerank_vectors=True
+    )
+    assert idx.rerank_model == "local:mon_modele_512d"
