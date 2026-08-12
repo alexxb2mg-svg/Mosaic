@@ -5,6 +5,17 @@
 **Semantic search over your own documents, built in the open from textbook parts —
 local, deterministic, no LLM in the loop. As much a working lesson as a tool.**
 
+```bash
+pip install -e ".[dev,ingest]"
+mosaic build ./my_documents -o ./index_docs
+mosaic search "how do I wire the differential breaker" ./index_docs --top 5
+# [{"id": "tableau_garage.md", "score": 0.62}, ...]   JSON out, ~50 ms warm
+```
+
+Python ≥ 3.12, numpy as the only core dependency, no GPU, no network at runtime.
+[Full quickstart](#quickstart) · [measured performance](#measured-performance) ·
+[architecture](docs/ARCHITECTURE.md) · [campaign log](docs/MEASURES.md).
+
 Mosaic is one practitioner's answer to one practitioner's constraints: a small
 business's documents made searchable by *meaning*, with no cloud, no GPU, no per-query
 bill, and results that can be trusted because they can be reproduced. It does not

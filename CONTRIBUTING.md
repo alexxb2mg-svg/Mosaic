@@ -1,5 +1,10 @@
 # Contributing
 
+New to the codebase? Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the
+pipeline map, the reason each channel exists, the invariants that are never
+negotiated, and a reading order. It exists so you can enter without the author in
+the room.
+
 Mosaic is a didactic experiment that runs in production — contributions feed an
 **educational resource** more than a product roadmap. That framing is not a
 disclaimer, it is the contribution guide in one sentence: what makes this repository
