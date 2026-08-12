@@ -92,7 +92,7 @@ tunes the weights on *your* ground truth.
 - **Measured calibration** (`mosaic calibrer`) — encoding weights picked by benchmark
   on ground-truth queries (or deterministically generated ones, `--verite-auto`),
   recommending a change only when the gain is clear.
-- **MCP server** (`infra_mcp/`) — all of the above as 10 MCP tools, dynamic domain
+- **MCP server** (`infra_mcp/`) — all of the above as 11 MCP tools, dynamic domain
   discovery, zero dependencies beyond the engine.
 
 ## Choose your setup — the measured terrain map

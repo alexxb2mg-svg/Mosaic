@@ -141,11 +141,15 @@ def diff(corpus_a: Path, corpus_b: Path) -> dict:
 
 
 def _rapport(d: dict) -> None:
-    print(f"docs : +{len(d['docs_ajoutes'])} / -{len(d['docs_retires'])}   "
-          f"vocab : +{len(d['vocab_apparu'])} / -{len(d['vocab_disparu'])}   "
-          f"collocations : +{len(d['collocations_nees'])} / -{len(d['collocations_mortes'])}")
+    print(
+        f"docs : +{len(d['docs_ajoutes'])} / -{len(d['docs_retires'])}   "
+        f"vocab : +{len(d['vocab_apparu'])} / -{len(d['vocab_disparu'])}   "
+        f"collocations : +{len(d['collocations_nees'])} / -{len(d['collocations_mortes'])}"
+    )
     if d["collocations_nees"]:
-        print("  concepts composés nés :", ", ".join(map(str, d["collocations_nees"][:8])))
+        print(
+            "  concepts composés nés :", ", ".join(map(str, d["collocations_nees"][:8]))
+        )
     print(f"\n-- dérive de MOT (top {TOP}, df>={DF_MIN} des deux côtés) --")
     for delta, t in d["derive_mots"][:TOP]:
         print(f"  {delta:.4f}  {t}")
@@ -157,7 +161,9 @@ def _rapport(d: dict) -> None:
     print(f"\n-- documents MODIFIÉS (contenu changé, top {TOP}) --")
     for delta, doc in d["docs_modifies"][:TOP]:
         print(f"  {delta:.4f}  {doc}")
-    print(f"\n-- dérive de CONTEXTE (contenu INTACT, la lecture nouvelle, top {TOP}) --")
+    print(
+        f"\n-- dérive de CONTEXTE (contenu INTACT, la lecture nouvelle, top {TOP}) --"
+    )
     for delta, doc in d["derive_contexte"][:TOP]:
         print(f"  {delta:.4f}  {doc}")
 
@@ -176,8 +182,10 @@ def banc() -> int:
         max_mot = d0["derive_mots"][0][0] if d0["derive_mots"] else 0.0
         max_ctx = d0["derive_contexte"][0][0] if d0["derive_contexte"] else 0.0
         p1 = max_mot == 0.0 and max_ctx == 0.0 and not d0["vocab_apparu"]
-        print(f"P1 spécificité (corpus identique) : dérive mot max {max_mot:.6f}, "
-              f"contexte max {max_ctx:.6f} -> {'OK' if p1 else 'ÉCHEC'}\n")
+        print(
+            f"P1 spécificité (corpus identique) : dérive mot max {max_mot:.6f}, "
+            f"contexte max {max_ctx:.6f} -> {'OK' if p1 else 'ÉCHEC'}\n"
+        )
 
         # t2 : substitution plantée (beurre -> margarine) + 4 docs d'un thème étranger
         t2 = Path(tmp) / "t2"
@@ -196,8 +204,10 @@ def banc() -> int:
                 f"moteur et le radiateur refroidit le circuit. Variante {i}.",
                 encoding="utf-8",
             )
-        print(f"plantés : 'beurre'->'margarine' dans {len(substitues)} docs, "
-              f"+4 docs thème moteur\n")
+        print(
+            f"plantés : 'beurre'->'margarine' dans {len(substitues)} docs, "
+            f"+4 docs thème moteur\n"
+        )
         d = diff(t1, t2)
         _rapport(d)
 
@@ -220,10 +230,12 @@ def banc() -> int:
         p2b = "beurre" in declins
         p2c = part_voisinage >= 0.7
         p2 = p2a and p2b and p2c
-        print(f"\nP2 sensibilité : margarine apparue {'OK' if p2a else 'ÉCHEC'} ; "
-              f"beurre dans le top 5 des déclins {'OK' if p2b else 'ÉCHEC'} ; "
-              f"top-10 dérive ⊂ voisinage substitué {part_voisinage:.0%} "
-              f"{'OK' if p2c else 'ÉCHEC'}")
+        print(
+            f"\nP2 sensibilité : margarine apparue {'OK' if p2a else 'ÉCHEC'} ; "
+            f"beurre dans le top 5 des déclins {'OK' if p2b else 'ÉCHEC'} ; "
+            f"top-10 dérive ⊂ voisinage substitué {part_voisinage:.0%} "
+            f"{'OK' if p2c else 'ÉCHEC'}"
+        )
 
         # P3 — localité : les docs intacts SANS beurre ni rapport au moteur dérivent
         # moins que les docs intacts qui PARLENT de beurre (voisins du chantier)
@@ -238,11 +250,15 @@ def banc() -> int:
         med_v = float(np.median(voisins)) if voisins else 0.0
         med_l = float(np.median(lointains)) if lointains else 0.0
         p3 = med_l < med_v / 3 if med_v > 0 else False
-        print(f"P3 localité : médiane contexte voisins-du-beurre {med_v:.5f} vs "
-              f"lointains {med_l:.5f} -> {'OK' if p3 else 'ÉCHEC'} "
-              f"(critère : lointains < voisins/3)")
-        print(f"\nVERDICT : P1 {'✓' if p1 else '✗'}  P2 {'✓' if p2 else '✗'}  "
-              f"P3 {'✓' if p3 else '✗'}")
+        print(
+            f"P3 localité : médiane contexte voisins-du-beurre {med_v:.5f} vs "
+            f"lointains {med_l:.5f} -> {'OK' if p3 else 'ÉCHEC'} "
+            f"(critère : lointains < voisins/3)"
+        )
+        print(
+            f"\nVERDICT : P1 {'✓' if p1 else '✗'}  P2 {'✓' if p2 else '✗'}  "
+            f"P3 {'✓' if p3 else '✗'}"
+        )
     return 0
 
 

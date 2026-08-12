@@ -86,6 +86,7 @@ def test_tools_list_returns_tool_schemas():
         "mosaic_actuel",
         "mosaic_chemin",
         "mosaic_stats",
+        "mosaic_diff",
     }
     for t in tools:
         assert "inputSchema" in t
@@ -313,8 +314,8 @@ def test_tools_call_chemin_et_erreur_sans_relations(tmp_path):
     """mosaic_chemin traverse quand l'index a le canal relations ; erreur claire sinon."""
     c = tmp_path / "corpus"
     for chemin, texte in [
-        ("ATLAS/2026/note_a.md", "eclairage led atlas"),
-        ("ATLAS/2026/note_b.md", "reception travaux atlas"),
+        ("IBIS/2026/note_a.md", "eclairage led ibis"),
+        ("IBIS/2026/note_b.md", "reception travaux ibis"),
     ]:
         f = c / chemin
         f.parent.mkdir(parents=True, exist_ok=True)
@@ -323,14 +324,14 @@ def test_tools_call_chemin_et_erreur_sans_relations(tmp_path):
     Index.build(c, tmp_path / "index_compta", grid=GRID)  # SANS relations
     state = mcp.new_state(tmp_path)
     result, data = _call(
-        state, "mosaic_chemin", {"doc_id": "ATLAS/2026/note_a.md", "domaine": "devis"}
+        state, "mosaic_chemin", {"doc_id": "IBIS/2026/note_a.md", "domaine": "devis"}
     )
     assert not result["isError"]
     dossier = next(g for g in data if g["role"] == "dossier")
-    assert {d["id"] for d in dossier["documents"]} == {"ATLAS/2026/note_b.md"}
+    assert {d["id"] for d in dossier["documents"]} == {"IBIS/2026/note_b.md"}
     # index sans relations : erreur d'exécution lisible, pas un crash protocole
     result2, _ = _call(
-        state, "mosaic_chemin", {"doc_id": "ATLAS/2026/note_a.md", "domaine": "compta"}
+        state, "mosaic_chemin", {"doc_id": "IBIS/2026/note_a.md", "domaine": "compta"}
     )
     assert result2["isError"]
     assert "relations" in result2["content"][0]["text"]
@@ -514,4 +515,46 @@ def test_stdio_smoke_initialize_and_tools_list(tmp_path):
         "mosaic_actuel",
         "mosaic_chemin",
         "mosaic_stats",
+        "mosaic_diff",
     }
+
+
+def test_tools_list_expose_diff_et_search_les_nouveaux_drapeaux(tmp_path):
+    """Le serveur suit le moteur : mosaic_diff présent, fusion/grammatical déclarés
+    sur mosaic_search (l'audit avait montré un README MCP en retard — le schéma est
+    désormais testé)."""
+    state = mcp.new_state(tmp_path)
+    rep = mcp.handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, state)
+    outils = {t["name"]: t for t in rep["result"]["tools"]}
+    assert "mosaic_diff" in outils
+    props = outils["mosaic_search"]["inputSchema"]["properties"]
+    assert "fusion" in props and "grammatical" in props
+
+
+def test_call_diff_domaines_identiques_diff_vide(tmp_path, monkeypatch):
+    """Deux domaines pointant le MÊME index : diff strictement vide (la garantie
+    contractuelle traverse le serveur)."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "a.md").write_text("interrupteur différentiel tableau", encoding="utf-8")
+    (corpus / "b.md").write_text("carrelage colle joint", encoding="utf-8")
+    from mosaic.index import Index
+
+    Index.build(corpus, tmp_path / "index_alpha", grid=(32, 32, 3))
+    Index.build(corpus, tmp_path / "index_beta", grid=(32, 32, 3))
+    state = mcp.new_state(tmp_path)
+    rep = mcp.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "mosaic_diff",
+                "arguments": {"domaine_avant": "alpha", "domaine_apres": "beta"},
+            },
+        },
+        state,
+    )
+    assert not rep["result"].get("isError"), rep
+    donnees = json.loads(rep["result"]["content"][0]["text"])
+    assert donnees["docs_ajoutes"] == [] and donnees["derive_mots"] == []

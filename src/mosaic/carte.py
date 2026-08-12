@@ -205,10 +205,12 @@ def generer(
     grid: tuple[int, int, int] = GRID_DEFAULT,
     date_str: str | None = None,
     **build_kwargs,
-) -> Path:
+) -> tuple[Path, int]:
     """Construit `dossier/_MOSAIC/index/` (via `Index.build`, ingestion incluse)
     puis écrit `dossier/_MOSAIC/cartes.html` : une carte par document, triées par
-    nom. Retourne le chemin du HTML.
+    nom. Retourne (chemin du HTML, nombre de documents) — le compte vient de
+    l'index DÉJÀ construit, jamais d'une réouverture (sur un gros dossier, rouvrir
+    l'index juste pour le compter doublait le coût de chargement).
     """
     dossier = Path(dossier)
     if date_str is None:
@@ -243,4 +245,4 @@ def generer(
     out = html_path(dossier)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(doc, encoding="utf-8")
-    return out
+    return out, n

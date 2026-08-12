@@ -27,6 +27,7 @@ seuil déclaré 80 %) — cf. research/canal_grammatical.py.
 """
 
 import re
+from typing import NamedTuple
 
 import numpy as np
 
@@ -94,6 +95,36 @@ DE_NUS = frozenset({"de", "d"})
 DE_DEFINIS = frozenset({"du", "des", "au", "aux"})
 
 
+class Extension(NamedTuple):
+    """Listes verbales OUVERTES AU MÉTIER, déclarées par le profil (clé « grammaire »).
+
+    Seules les listes dépendantes du domaine sont extensibles (verbes d'action,
+    participes passifs, sauts de pose) — les classes fermées du français (négateurs,
+    copules, prépositions, délimiteurs de portée) ne le sont PAS : c'est leur clôture
+    qui fonde le déterminisme et le taux d'erreur mesuré de l'analyseur."""
+
+    verbes_actifs: frozenset[str]
+    participes_passifs: frozenset[str]
+    saut_gauche: frozenset[str]
+
+
+def extension_depuis_profil(profil: dict | None) -> Extension | None:
+    """Extension grammaticale déclarée par un profil d'index, ou None.
+
+    Contrat (doctrine abstention > devinette, donc AUCUNE magie morphologique) :
+    - `verbes_actifs` et `saut_gauche` : formes conjuguées EXACTES, telles quelles ;
+    - `participes_passifs` : masculin singulier, les accords e/s/es sont mécaniques
+      et ajoutés automatiquement (seule flexion sans ambiguïté)."""
+    g = (profil or {}).get("grammaire")
+    if not g:
+        return None
+    return Extension(
+        verbes_actifs=frozenset(g.get("verbes_actifs", ())),
+        participes_passifs=_avec_accords(" ".join(g.get("participes_passifs", ()))),
+        saut_gauche=frozenset(g.get("saut_gauche", ())),
+    )
+
+
 def _tokens(clause: str) -> list[str]:
     return _MOT_RE.findall(clause.lower())
 
@@ -103,8 +134,10 @@ def _est_plein(tok: str) -> bool:
     return len(tok) >= 3 and not any(ch.isdigit() for ch in tok) and tok not in _PONCT
 
 
-def _argument_gauche(toks: list[str], i: int) -> str | None:
-    """Premier token plein à gauche de la position i, en sautant SAUT_GAUCHE et les
+def _argument_gauche(
+    toks: list[str], i: int, saut: frozenset[str] = SAUT_GAUCHE
+) -> str | None:
+    """Premier token plein à gauche de la position i, en sautant `saut` et les
     stopwords ; ponctuation, début de phrase ou NÉGATEUR -> None (un argument nié
     n'est pas un argument : la relation ne tient pas, on s'abstient)."""
     j = i - 1
@@ -112,7 +145,7 @@ def _argument_gauche(toks: list[str], i: int) -> str | None:
         t = toks[j]
         if t in _PONCT or t in NEGATEURS_NOMINAUX:
             return None
-        if t in SAUT_GAUCHE or t in STOPWORDS or not _est_plein(t):
+        if t in saut or t in STOPWORDS or not _est_plein(t):
             j -= 1
             continue
         return t
@@ -134,7 +167,9 @@ def _argument_droit(toks: list[str], i: int) -> str | None:
     return None
 
 
-def _portee_negation(toks: list[str], i: int) -> list[str]:
+def _portee_negation(
+    toks: list[str], i: int, va: frozenset[str] = VERBES_ACTIFS
+) -> list[str]:
     """Tokens pleins couverts par un négateur nominal en position i (max 4)."""
     portee: list[str] = []
     j = i + 1
@@ -147,7 +182,7 @@ def _portee_negation(toks: list[str], i: int) -> list[str]:
             or t in DE_DEFINIS
         ):
             break
-        if portee and (t in VERBES_ACTIFS or t in COPULES):
+        if portee and (t in va or t in COPULES):
             break  # un verbe conjugué (liste fermée) termine le groupe nominal nié —
             # mais la TÊTE du groupe peut être un homographe (« aucun contrôle de… »)
         if t in DE_NUS:
@@ -177,8 +212,15 @@ def _indices_verbes_nies(toks: list[str]) -> set[int]:
     return nies
 
 
-def analyse(clause: str) -> list[tuple[str, str]]:
-    """Rôles (role, entite) d'une clause — liste FERMÉE de motifs, abstention par défaut."""
+def analyse(clause: str, extension: Extension | None = None) -> list[tuple[str, str]]:
+    """Rôles (role, entite) d'une clause — liste FERMÉE de motifs, abstention par
+    défaut. `extension` (clé « grammaire » d'un profil d'index) élargit les seules
+    listes ouvertes au métier."""
+    va, pp, saut = VERBES_ACTIFS, PARTICIPES_PASSIFS, SAUT_GAUCHE
+    if extension is not None:
+        va = va | extension.verbes_actifs
+        pp = pp | extension.participes_passifs
+        saut = saut | extension.saut_gauche
     toks = _tokens(clause)
     rel: list[tuple[str, str]] = []
     vu: set[tuple[str, str]] = set()
@@ -195,7 +237,7 @@ def analyse(clause: str) -> list[tuple[str, str]]:
         if t in NEGATEURS_NOMINAUX:
             if t == "sans" and i + 1 < len(toks) and toks[i + 1] in IDIOMES_SANS:
                 continue  # vis sans fin, sans suite… : idiome, abstention
-            for ent in _portee_negation(toks, i):
+            for ent in _portee_negation(toks, i, va):
                 emet("absent", ent)
             continue
 
@@ -216,7 +258,7 @@ def analyse(clause: str) -> list[tuple[str, str]]:
             if verbe in COPULES:
                 emet("absent", _argument_droit(toks, i))  # n'est pas conforme
             elif verbe in EXISTENTIELS and i + 1 < len(toks) and toks[i + 1] in DE_NUS:
-                for ent in _portee_negation(toks, i + 1):
+                for ent in _portee_negation(toks, i + 1, va):
                     emet("absent", ent)  # ne dispose pas de bypass manuel
             elif verbe is not None:
                 emet("absent", verbe)  # ne coupe pas … : l'action est niée
@@ -226,7 +268,7 @@ def analyse(clause: str) -> list[tuple[str, str]]:
         if t in ("amont", "aval") and i > 0 and toks[i - 1] == "en":
             if i + 1 >= len(toks) or toks[i + 1] not in (DE_NUS | DE_DEFINIS):
                 continue
-            x = _argument_gauche(toks, i - 1)
+            x = _argument_gauche(toks, i - 1, saut)
             y = _argument_droit(toks, i + 1)
             if x is None or y is None:
                 continue  # jamais une demi-relation
@@ -239,8 +281,8 @@ def analyse(clause: str) -> list[tuple[str, str]]:
             continue
 
         # ---- voix active : X V Y (V dans la liste fermée, non nié) -------------
-        if t in VERBES_ACTIFS and i not in nies:
-            x = _argument_gauche(toks, i)
+        if t in va and i not in nies:
+            x = _argument_gauche(toks, i, saut)
             y = _argument_droit(toks, i)
             if x is not None and y is not None:
                 emet("agent", x)
@@ -248,9 +290,9 @@ def analyse(clause: str) -> list[tuple[str, str]]:
             continue
 
         # ---- voix passive : X est PARTICIPE par Y ------------------------------
-        if t in PARTICIPES_PASSIFS and i > 0 and toks[i - 1] in COPULES:
+        if t in pp and i > 0 and toks[i - 1] in COPULES:
             if i + 1 < len(toks) and toks[i + 1] == "par":
-                x = _argument_gauche(toks, i - 1)
+                x = _argument_gauche(toks, i - 1, saut)
                 y = _argument_droit(toks, i + 1)
                 if x is not None and y is not None:
                     emet("patient", x)
@@ -263,9 +305,11 @@ def analyse(clause: str) -> list[tuple[str, str]]:
 # --- P2 : mesure contre le banc -----------------------------------------------------
 
 
-def canal_document(texte: str, dim: int) -> tuple[np.ndarray, float]:
+def canal_document(
+    texte: str, dim: int, extension: Extension | None = None
+) -> tuple[np.ndarray, float]:
     """Canal grammatical d'un document : Σ bind(rôle, entité) sur les rôles analysés
     du TEXTE BRUT (l'analyseur exige l'ordre des mots et la ponctuation — jamais le
     flux canonicalisé), normalisé et quantifié int8 par le schéma du canal relations.
     Aucun rôle -> vecteur nul, norme 0.0 (neutre)."""
-    return document_channel(analyse(texte), dim)
+    return document_channel(analyse(texte, extension), dim)

@@ -284,6 +284,7 @@ class Index:
         # des mots + ponctuation), jamais sur le flux canonicalisé — calcul DANS la
         # boucle de lecture, le texte n'est pas conservé.
         gram_rows: list[tuple[np.ndarray, float]] = []
+        ext_gram = grammaire_module.extension_depuis_profil(profil)
         dim_grille = grid[0] * grid[1] * grid[2]
         facettes: dict[str, dict[str, str]] = {}
         ignores = 0
@@ -315,7 +316,9 @@ class Index:
             if rerank_vectors:
                 rerank_texts.append(text)
             if grammatical:
-                gram_rows.append(grammaire_module.canal_document(text, dim_grille))
+                gram_rows.append(
+                    grammaire_module.canal_document(text, dim_grille, ext_gram)
+                )
         if lexicon is None:
             lexicon = load_lexicon()
         compiled = compile_lexicon(lexicon)
@@ -903,7 +906,9 @@ class Index:
             # Canal grammatical du nouveau document — analysé sur son TEXTE brut.
             assert self.gram_norms is not None
             v_g, n_g = grammaire_module.canal_document(
-                text, self.grid[0] * self.grid[1] * self.grid[2]
+                text,
+                self.grid[0] * self.grid[1] * self.grid[2],
+                grammaire_module.extension_depuis_profil(self.profil),
             )
             self.gram_mat = np.vstack([self.gram_mat, v_g[None, :]])
             self.gram_norms = np.append(self.gram_norms, np.float32(n_g))

@@ -77,7 +77,7 @@ def _dossier_md_seul(tmp_path: Path) -> Path:
 
 def test_generer_retourne_le_chemin_html(tmp_path):
     d = _dossier_md_seul(tmp_path)
-    out = carte.generer(d, grid=GRID)
+    out, _ = carte.generer(d, grid=GRID)
     assert out == d / "_MOSAIC" / "cartes.html"
     assert out.is_file()
 
@@ -87,7 +87,7 @@ def test_html_contient_une_carte_par_doc_avec_png_et_concepts(tmp_path):
     # index_paths=False : ce test porte sur la curation d'affichage des concepts
     # (bruit numérique/boilerplate), pas sur les tokens de chemin (v1.5) — épinglé
     # comme les tests brut/smoothing_rank=0 juste plus bas dans ce fichier.
-    out = carte.generer(d, k_concepts=5, grid=GRID, index_paths=False)
+    out, _ = carte.generer(d, k_concepts=5, grid=GRID, index_paths=False)
     text = out.read_text(encoding="utf-8")
     assert "un.md" in text
     assert "deux.md" in text
@@ -99,14 +99,14 @@ def test_html_contient_une_carte_par_doc_avec_png_et_concepts(tmp_path):
 
 def test_html_contient_le_nombre_de_tokens(tmp_path):
     d = _dossier_md_seul(tmp_path)
-    out = carte.generer(d, grid=GRID)
+    out, _ = carte.generer(d, grid=GRID)
     text = out.read_text(encoding="utf-8")
     assert "tokens" in text
 
 
 def test_html_contient_lien_file_vers_original(tmp_path):
     d = _dossier_md_seul(tmp_path)
-    out = carte.generer(d, grid=GRID)
+    out, _ = carte.generer(d, grid=GRID)
     text = out.read_text(encoding="utf-8")
     original = (d / "un.md").resolve().as_uri()
     assert original in text
@@ -114,7 +114,7 @@ def test_html_contient_lien_file_vers_original(tmp_path):
 
 def test_html_autonome_sans_ressource_externe(tmp_path):
     d = _dossier_md_seul(tmp_path)
-    out = carte.generer(d, grid=GRID)
+    out, _ = carte.generer(d, grid=GRID)
     text = out.read_text(encoding="utf-8")
     assert "http://" not in text
     assert "https://" not in text
@@ -127,14 +127,14 @@ def test_generer_tri_par_nom(tmp_path):
     d.mkdir()
     (d / "zeta.md").write_text("mot", encoding="utf-8")
     (d / "alpha.md").write_text("mot", encoding="utf-8")
-    out = carte.generer(d, grid=GRID)
+    out, _ = carte.generer(d, grid=GRID)
     text = out.read_text(encoding="utf-8")
     assert text.index("alpha.md") < text.index("zeta.md")
 
 
 def test_generer_date_str_par_defaut_et_fixe(tmp_path):
     d = _dossier_md_seul(tmp_path)
-    out = carte.generer(d, grid=GRID, date_str="09/08/2026")
+    out, _ = carte.generer(d, grid=GRID, date_str="09/08/2026")
     text = out.read_text(encoding="utf-8")
     assert "09/08/2026" in text
     assert "généré par Mosaic" in text
@@ -142,7 +142,7 @@ def test_generer_date_str_par_defaut_et_fixe(tmp_path):
 
 def test_generer_top_k_concepts_limite_le_nombre_de_barres(tmp_path):
     d = _dossier_md_seul(tmp_path)
-    out = carte.generer(d, k_concepts=2, grid=GRID)
+    out, _ = carte.generer(d, k_concepts=2, grid=GRID)
     text = out.read_text(encoding="utf-8")
     assert text.count('class="bar-row"') <= 2 * 2  # 2 docs x 2 concepts max
 
@@ -150,7 +150,7 @@ def test_generer_top_k_concepts_limite_le_nombre_de_barres(tmp_path):
 def test_generer_pdf_reel_inclus(tmp_path):
     pytest.importorskip("markitdown")
     d = _dossier_mixte(tmp_path)
-    out = carte.generer(d, grid=GRID)
+    out, _ = carte.generer(d, grid=GRID)
     text = out.read_text(encoding="utf-8")
     assert "devis.pdf" in text
     assert "note.md" in text
@@ -162,10 +162,10 @@ def test_generer_pdf_reel_inclus(tmp_path):
 
 def test_mosaic_non_indexe_au_rebuild(tmp_path):
     d = _dossier_md_seul(tmp_path)
-    out1 = carte.generer(d, grid=GRID)
+    out1, _ = carte.generer(d, grid=GRID)
     # cartes.html a une extension .html : CONVERTIBLE_EXTS le rendrait indexable
     # sans l'exclusion _MOSAIC/. Un 2e passage ne doit pas gonfler le corpus.
-    out2 = carte.generer(d, grid=GRID)
+    out2, _ = carte.generer(d, grid=GRID)
     idx = Index.open(carte.index_dir(d))
     assert idx.stats()["docs"] == 2
     assert "_MOSAIC/cartes.html" not in idx.ids
@@ -324,7 +324,7 @@ def test_concepts_numeriques_exclus_de_laffichage(tmp_path):
     # v1.2 a changé les défauts de Index.build (ppmi/300) : ce test porte sur le
     # comportement BRUT vérifié manuellement (docstring ci-dessus), donc épinglé
     # explicitement — indépendant du changement de défaut.
-    out = carte.generer(
+    out, _ = carte.generer(
         d, k_concepts=5, grid=GRID, profile_weighting="brut", smoothing_rank=0
     )
     labels = _labels(out.read_text(encoding="utf-8"))
@@ -351,7 +351,7 @@ def test_concepts_boilerplate_partages_filtres(tmp_path):
     )
     # index_paths=False : ce test épingle un top-6 « vérifié manuellement » avant
     # l'injection des tokens de chemin (v1.5) — même raison que le test précédent.
-    out = carte.generer(d, k_concepts=6, grid=GRID, index_paths=False)
+    out, _ = carte.generer(d, k_concepts=6, grid=GRID, index_paths=False)
     labels = _labels(out.read_text(encoding="utf-8"))
     assert "tva" not in labels
     assert "ht" not in labels
@@ -379,7 +379,7 @@ def test_boilerplate_plancher_par_carte_evite_carte_vide(tmp_path):
         "30 00 15 6 3",
         encoding="utf-8",
     )
-    out = carte.generer(d, k_concepts=5, grid=GRID)
+    out, _ = carte.generer(d, k_concepts=5, grid=GRID)
     text = out.read_text(encoding="utf-8")
     labels = _labels(text)
     assert (
@@ -397,7 +397,7 @@ def test_boilerplate_non_applique_a_un_seul_document(tmp_path):
         "disjoncteur cablage tableau protection differentiel prise interrupteur tva ht",
         encoding="utf-8",
     )
-    out = carte.generer(d, k_concepts=5, grid=GRID)
+    out, _ = carte.generer(d, k_concepts=5, grid=GRID)
     labels = _labels(out.read_text(encoding="utf-8"))
     assert len(labels) == 5
 

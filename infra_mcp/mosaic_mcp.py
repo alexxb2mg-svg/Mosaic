@@ -39,7 +39,7 @@ SERVER_VERSION = "1.6.0"
 # aucune négociation dynamique ici (serveur minimal, un seul comportement).
 PROTOCOL_VERSION = "2024-11-05"
 
-# domaine -> la racine des index/index_<domaine>
+# domaine -> la racine des index/index_<domaine> 
 # Les domaines sont DÉCOUVERTS dynamiquement : tout dossier `index_<domaine>` sous la racine
 # des index est un domaine interrogeable (plus de liste en dur — un nouvel index déposé par un
 # script ou un rebuild devient accessible sans toucher au serveur). DEFAULT_DATA_DIR reste le
@@ -72,7 +72,8 @@ TOOLS = [
             "relevé chantier, 'pdf scanné' vs 'pdf numérique', 'document rédigé', 'page web', "
             "'note texte') ; une RÉFÉRENCE/code dans la question (réf produit, numéro de "
             "devis/commande) -> boost AUTOMATIQUE : les documents portant ce code exactement "
-            "remontent en tête avec le champ ref_exacte."
+            "remontent en tête avec le champ ref_exacte (pour un produit, préférer le domaine "
+            "'produits')."
         ),
         "inputSchema": {
             "type": "object",
@@ -86,6 +87,22 @@ TOOLS = [
                     "description": "nom du domaine (= dossier index_<domaine> sous la racine des index).",
                 },
                 "top": {"type": "integer", "default": 5, "minimum": 1},
+                "fusion": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Fusion RRF multi-canaux (grille+BM25+embeddings, +atlas si "
+                    "présent) — nécessite un index construit avec --hybride ; gagnant mesuré "
+                    "sur terrain LEXICAL (la question recopie le vocabulaire des documents). "
+                    "Exclusif avec rerank.",
+                },
+                "grammatical": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Canal grammatical (nécessite un index --grammatical) : "
+                    "sépare les clauses à mots identiques et sens opposé (négation à portée, "
+                    "amont/aval). À activer quand la STRUCTURE de la phrase porte le sens ; "
+                    "exclusif avec rerank/fusion/type/recence.",
+                },
                 "rerank": {
                     "type": "boolean",
                     "default": True,
@@ -293,6 +310,32 @@ TOOLS = [
             "required": ["domaine"],
         },
     },
+    {
+        "name": "mosaic_diff",
+        "description": (
+            "Diff SÉMANTIQUE entre deux index d'un même corpus à deux moments : ce qui a "
+            "changé de SENS, pas seulement de contenu — vocabulaire apparu/disparu, mots "
+            "dont le contexte a dérivé, déclins/croissances d'usage, et documents dont la "
+            "grille a bougé. Garantie : deux index identiques rendent un diff strictement "
+            "vide (déterminisme). Les deux index doivent partager la même configuration "
+            "d'encodage (refus net sinon)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domaine_avant": {
+                    "type": "string",
+                    "description": "domaine de l'état t1 (= dossier index_<domaine>).",
+                },
+                "domaine_apres": {
+                    "type": "string",
+                    "description": "domaine de l'état t2.",
+                },
+                "top": {"type": "integer", "default": 20, "minimum": 1},
+            },
+            "required": ["domaine_avant", "domaine_apres"],
+        },
+    },
 ]
 
 
@@ -343,7 +386,7 @@ def _get_index(state: dict, domaine: str) -> Index:
     # verify_embeddings=False : chemin recherche/consultation uniquement, jamais de mutation
     # (aucun outil MCP n'appelle add()) — cf. Index.open() et la CLI `mosaic search`.
     idx = Index.open(index_dir, verify_embeddings=False)
-    idx.chauffer_recherche()  # process long : RAM contre latence (x13 mesuré)
+    idx.chauffer_recherche()  # process long : RAM contre latence (x11 mesuré)
     cache[domaine] = idx
     cache_mtime[domaine] = current_mtime
     return idx
@@ -360,7 +403,11 @@ def _call_mosaic_search(state: dict, args: dict) -> object:
     top = int(args.get("top", 5))
     if top < 1:
         raise ValueError(f"top doit être >= 1 : {top!r}")
-    rerank = bool(args.get("rerank", True))
+    fusion = bool(args.get("fusion", False))
+    grammatical = bool(args.get("grammatical", False))
+    # rerank par défaut, SAUF si un mode exclusif est demandé (le moteur refuse les
+    # combinaisons — ici on résout le défaut, jamais une exclusivité en silence).
+    rerank = bool(args.get("rerank", not (fusion or grammatical)))
     type_filtre = args.get("type") or None
     recence = float(args.get("recence", 0.0))
     idx = _get_index(state, args["domaine"])
@@ -370,7 +417,21 @@ def _call_mosaic_search(state: dict, args: dict) -> object:
         rerank=rerank,
         type_filtre=type_filtre,
         recence=recence,
+        fusion=fusion,
+        grammatical=grammatical,
     )
+
+
+def _call_mosaic_diff(state: dict, args: dict) -> object:
+    from mosaic.diff import diff_indexes
+
+    _require(args, "domaine_avant", "domaine_apres")
+    top = int(args.get("top", 20))
+    if top < 1:
+        raise ValueError(f"top doit être >= 1 : {top!r}")
+    ia = _get_index(state, args["domaine_avant"])
+    ib = _get_index(state, args["domaine_apres"])
+    return diff_indexes(ia, ib, top=top)
 
 
 def _call_mosaic_explain(state: dict, args: dict) -> object:
@@ -478,6 +539,7 @@ _TOOL_HANDLERS = {
     "mosaic_actuel": _call_mosaic_actuel,
     "mosaic_chemin": _call_mosaic_chemin,
     "mosaic_stats": _call_mosaic_stats,
+    "mosaic_diff": _call_mosaic_diff,
 }
 
 

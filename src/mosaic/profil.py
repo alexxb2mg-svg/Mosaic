@@ -28,13 +28,16 @@ from pathlib import Path
 # contexte d'année). Un profil `roles` la REMPLACE entièrement (déclaratif pur, tout visible).
 ROLES_RESERVES_DEFAUT = None  # sentinel : « utiliser la logique historique »
 
-_CLES_VALIDES = {"nom", "description", "roles", "types", "refs", "grilles"}
+_CLES_VALIDES = {"nom", "description", "roles", "types", "refs", "grilles", "grammaire"}
 # grilles typées (v4) : surcharge des types de base (dim/poids/lissage/embeddings)
 # ou déclaration de types custom (motif de routage OBLIGATOIRE pour un type custom)
 _CLES_GRILLE = {"dim", "poids", "lissage", "embeddings", "motif"}
 _TYPES_BASE = {"sens", "ref", "chemin"}
 _CLES_ROLE = {"role", "motif", "valeur"}
 _CLES_REFS = {"min_mixte", "min_chiffres", "motif"}
+# canal grammatical : seules les listes verbales OUVERTES AU MÉTIER sont extensibles —
+# les classes fermées du français (négateurs, copules, portées) ne le sont pas
+_CLES_GRAMMAIRE = {"verbes_actifs", "participes_passifs", "saut_gauche"}
 
 
 def valider(profil: dict) -> dict:
@@ -106,6 +109,33 @@ def valider(profil: dict) -> dict:
                 raise ValueError(
                     f"profil.refs.motif : regex invalide {motif_refs!r} ({exc})"
                 ) from None
+    if "grammaire" in profil:
+        gram_brut = profil["grammaire"]
+        if not isinstance(gram_brut, dict) or not gram_brut:
+            raise ValueError(
+                f"profil.grammaire : objet non vide attendu, reçu {gram_brut!r}"
+            )
+        gram: dict = gram_brut
+        if set(gram) - _CLES_GRAMMAIRE:
+            raise ValueError(
+                f"profil.grammaire : clés valides {sorted(_CLES_GRAMMAIRE)}, "
+                f"reçu {sorted(gram)}"
+            )
+        for cle_g, formes in gram.items():
+            if (
+                not isinstance(formes, list)
+                or not formes
+                or not all(isinstance(f, str) and f for f in formes)
+            ):
+                raise ValueError(
+                    f"profil.grammaire.{cle_g} : liste non vide de formes (str) attendue"
+                )
+            en_faute = [f for f in formes if f != f.lower() or " " in f]
+            if en_faute:
+                raise ValueError(
+                    f"profil.grammaire.{cle_g} : formes en minuscules, un seul mot "
+                    f"chacune (l'analyseur compare des tokens) — reçu {en_faute!r}"
+                )
     if "grilles" in profil:
         g_brut = profil["grilles"]
         if not isinstance(g_brut, dict) or not g_brut:

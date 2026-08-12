@@ -510,6 +510,35 @@ def _construire_parser() -> argparse.ArgumentParser:
         default=SMOOTHING_RANK_DEFAULT,
         help="rang du lissage SVD, entier >= 0",
     )
+    p_carte.add_argument(
+        "--grid",
+        choices=sorted(_GRIDS),
+        default="64x64",
+        help="géométrie de la grille de l'index jetable",
+    )
+    p_carte.add_argument(
+        "--embeddings",
+        default=None,
+        help="table d'embeddings .msee (canal γ) pour l'index jetable — mêmes "
+        "concepts, similarités plus fines",
+    )
+    p_carte.add_argument(
+        "--ocr",
+        action="store_true",
+        help="active le crochet OCR de l'ingestion (photos et PDF scannés du dossier "
+        "cartographié — sans lui ils sont ignorés, donc SANS carte)",
+    )
+    p_carte.add_argument(
+        "--type-doc",
+        action="store_true",
+        help="ajoute la facette type de document à l'encodage de l'index jetable",
+    )
+    p_carte.add_argument(
+        "--profil",
+        default=None,
+        help="profil d'index (JSON) appliqué à l'index jetable — types custom, "
+        "critère de références, listes grammaticales",
+    )
 
     p_proches = ajouter("proches", "voisins d'un mot (table .msee ou index de corpus)")
     p_proches.add_argument("mot", help="mot dont on veut les voisins")
@@ -946,14 +975,18 @@ def _cmd_carte(args) -> int:
     ingest_cache_dir = _ingest_cache_root() if args.cache_ingestion else None
     profile_weighting = _parse_profile_weighting(args.profile_weighting)
     smoothing_rank = _parse_int_nonnegative(args.smoothing_rank, "smoothing-rank")
-    out = carte.generer(
+    out, docs = carte.generer(
         dossier,
         k_concepts=args.top_concepts,
+        grid=_GRIDS[args.grid],
         ingest_cache_dir=ingest_cache_dir,
         profile_weighting=profile_weighting,
         smoothing_rank=smoothing_rank,
+        embeddings_path=Path(args.embeddings) if args.embeddings else None,
+        ocr=args.ocr,
+        type_doc=args.type_doc,
+        profil=(profil_module.charger(Path(args.profil)) if args.profil else None),
     )
-    docs = Index.open(carte.index_dir(dossier)).stats()["docs"]
     _out({"ok": True, "out": str(out), "docs": docs})
     return 0
 

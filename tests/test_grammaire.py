@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from mosaic.grammaire import analyse
+from mosaic.grammaire import analyse, extension_depuis_profil
 from mosaic.index import Index
+from mosaic.profil import valider
 
 PY = [sys.executable, "-m", "mosaic.cli"]
 GRID = (32, 32, 3)
@@ -84,6 +85,39 @@ def test_add_analyse_le_nouveau_document(tmp_path):
     idx.add(nouveau)
     ré = Index.open(tmp_path / "idx")
     assert ré.stats()["grammatical"]["docs_avec_roles"] == 3
+
+
+def test_extension_profil_ouvre_les_listes_metier(tmp_path):
+    """Un verbe métier hors des listes du moteur ne produit AUCUN rôle nu ; déclaré
+    dans la clé « grammaire » du profil, il porte agent/patient — et l'extension
+    circule par le profil persisté jusqu'à `add` (index construit AVEC profil)."""
+    clause = "La pompe arrose le massif."
+    assert analyse(clause) == []
+    profil = valider({"grammaire": {"verbes_actifs": ["arrose", "arrosent"]}})
+    ext = extension_depuis_profil(profil)
+    assert set(analyse(clause, ext)) == {("agent", "pompe"), ("patient", "massif")}
+
+    c = _corpus(tmp_path)
+    (c / "pompe.md").write_text(clause, encoding="utf-8")
+    idx = Index.build(c, tmp_path / "idx", grid=GRID, grammatical=True, profil=profil)
+    assert idx.stats()["grammatical"]["docs_avec_roles"] == 3
+    nouveau = tmp_path / "pompe2.md"
+    nouveau.write_text("La pompe arrose la serre.", encoding="utf-8")
+    Index.open(tmp_path / "idx").add(nouveau)
+    assert Index.open(tmp_path / "idx").stats()["grammatical"]["docs_avec_roles"] == 4
+
+
+def test_profil_grammaire_validation_stricte():
+    """Clé inconnue, liste vide, forme majuscule/multi-mots : refus fort et tôt —
+    seules les listes métier sont extensibles, jamais les classes fermées."""
+    with pytest.raises(ValueError, match="grammaire"):
+        valider({"grammaire": {"negateurs": ["zéro"]}})
+    with pytest.raises(ValueError, match="liste non vide"):
+        valider({"grammaire": {"verbes_actifs": []}})
+    with pytest.raises(ValueError, match="minuscules"):
+        valider({"grammaire": {"verbes_actifs": ["Arrose"]}})
+    with pytest.raises(ValueError, match="minuscules"):
+        valider({"grammaire": {"saut_gauche": ["mis en place"]}})
 
 
 def test_cli_gardes(tmp_path):
