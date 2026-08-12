@@ -77,7 +77,7 @@ Pick by terrain — and know the bill before you flip a flag:
 flowchart TD
     Q{"What does your corpus look like?"}
     Q -->|"prose, paraphrase-heavy queries"| A["default grid + embeddings + rerank, no fusion — disk 48 KB/word + 12 KB/doc, RAM 370 MB @ 18k docs, 27-63 ms/query, build minutes (nightly)"]
-    Q -->|"lexical Q&A: queries reuse the docs' vocabulary"| B["--hybride --atlas at build, --fusion at search — same + a few MB postings + 4.5 KB/doc, 29 ms/query, build adds a SOM (minutes, a few GB RAM at 70k+ words)"]
+    Q -->|"lexical Q&A: queries reuse the docs' vocabulary"| B["--hybride --atlas at build, --fusion at search — SERVING: same RAM as above, + a few MB postings + 4.5 KB/doc on disk, 29 ms/query. BUILD ONLY: the SOM adds minutes and a few GB of RAM at 70k+ words, then releases everything"]
     Q -->|"dense in identifiers (catalogs, part numbers)"| C["--grilles-typees + --rerank-vectors — often CHEAPER: meaning grid up to 4x smaller, identifier grids 3 KB/word, same latency"]
     Q -->|"code"| U["not measured yet: run the benches, tell us"]
     A --> T{"Folder evolves over time?"}
