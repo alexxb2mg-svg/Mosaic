@@ -164,18 +164,18 @@ know the bill before you flip a flag:
 
 ```mermaid
 flowchart TD
-    Q{"What does your corpus<br/>look like?"}
-    Q -->|"prose, paraphrase-heavy<br/>queries"| A["default grid + embeddings<br/>+ --rerank — <b>no fusion</b>"]
-    Q -->|"lexical Q&A — queries reuse<br/>the docs' vocabulary"| B["--hybride at build<br/>--fusion at search"]
-    Q -->|"dense in identifiers<br/>(catalogs, part numbers)"| C["--grilles-typees<br/>+ --rerank-vectors"]
-    Q -->|"code"| U["not measured yet —<br/>run the benches, tell us"]
-    A --> T{"Folder evolves<br/>over time?"}
+    Q{"What does your corpus look like?"}
+    Q -->|"prose, paraphrase-heavy queries"| A["default grid + embeddings + rerank, no fusion"]
+    Q -->|"lexical Q&A: queries reuse the docs' vocabulary"| B["--hybride at build, --fusion at search"]
+    Q -->|"dense in identifiers (catalogs, part numbers)"| C["--grilles-typees + --rerank-vectors"]
+    Q -->|"code"| U["not measured yet: run the benches, tell us"]
+    A --> T{"Folder evolves over time?"}
     B --> T
     C --> T
-    T -->|"yes"| V["add mosaic actuel<br/>(stale versions get flagged)"] --> M
-    T -->|"no"| M{"Machine budget<br/>tight?"}
-    M -->|"yes"| S["--grid 32x32: ÷4 every vector cost<br/>--smoothing-rank 0: skip the SVD<br/>skip optional extras"] --> DONE
-    M -->|"no"| DONE["build, then let measurement tune it:<br/>mosaic calibrer + your ground truth"]
+    T -->|"yes"| V["add mosaic actuel: stale versions get flagged"] --> M
+    T -->|"no"| M{"Machine budget tight?"}
+    M -->|"yes"| S["--grid 32x32 divides every vector cost by 4, --smoothing-rank 0 skips the SVD, skip optional extras"] --> DONE
+    M -->|"no"| DONE["build, then let measurement tune it: mosaic calibrer + your ground truth"]
 ```
 
 | Your corpus looks like | Measured best setup | Evidence | What it costs |
