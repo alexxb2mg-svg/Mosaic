@@ -1,4 +1,4 @@
-"""Courbe de capacité du canal de relations (horizon v2.0, question d'Alex).
+"""Courbe de capacité du canal de relations (horizon v2.0).
 
 Question mesurée : dans un vecteur de dimension D, si l'on superpose K relations liées
 `lier(rôle, entité)` dans la mosaïque d'un document, peut-on encore retrouver de façon

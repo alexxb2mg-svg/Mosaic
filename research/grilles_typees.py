@@ -1,11 +1,11 @@
-"""Grilles typées — idée d'Alex (12/08 ~02h) : router chaque TYPE de donnée vers SA grille.
+"""Grilles typées — idée du 12/08 : router chaque TYPE de donnée vers SA grille.
 
 L'IDÉE : au lieu d'une grande grille unique où tout se superpose (et où une référence
 produit se fait noyer par 50 mots courants — mesuré en prod, d'où le boost réf en
 facette), l'encodeur trie à l'écriture : les mots de sens dans une grille, les
 identifiants (réfs, codes) dans une autre, les tokens de chemin dans une troisième —
 autant de grilles que les types le nécessitent. À la lecture, une synthèse recombine
-les lectures par grille. Corollaire d'Alex : la séparation permet peut-être de
+les lectures par grille. Corollaire : la séparation permet peut-être de
 RÉTRÉCIR chaque grille (3×32×32 < 64×64 unique) — à évaluer.
 
 QUESTION FALSIFIABLE : à budget de dimensions ÉGAL (et inférieur), les grilles typées
@@ -311,7 +311,7 @@ def main() -> int:
     else:
         corpus_refs = None
 
-    print("=== Grilles typées (idée Alex 12/08) — expérience contrôlée ===")
+    print("=== Grilles typées (idée du 12/08) — expérience contrôlée ===")
     print(
         f"corpus : {corpus}",
         f"(échantillon {ECHANTILLON_DOCS})" if echantillonne else "",

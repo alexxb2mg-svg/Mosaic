@@ -505,7 +505,7 @@ def test_run_bench_avec_echecs_ligne_malformee_ignoree_avec_avertissement(tmp_pa
 
 def test_charger_echecs_reels_attendu_chaine_promu_en_liste(tmp_path):
     """ "attendu" en chaîne unique (pas liste) est accepté et promu en liste à 1 élément —
-    tolérance d'usage : Alex/un agent qui note un seul document ne doit pas se soucier de
+    tolérance d'usage : l'auteur/un agent qui note un seul document ne doit pas se soucier de
     la syntaxe liste JSON."""
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bench"))
     import importlib

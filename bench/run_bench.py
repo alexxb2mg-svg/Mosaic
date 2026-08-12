@@ -149,6 +149,12 @@ def main() -> None:
         "les indexer injecterait du bruit hexadécimal dans les grilles et le vocabulaire",
     )
     parser.add_argument(
+        "--grilles-typees",
+        action="store_true",
+        help="index à grilles typées v4 (même drapeau que la CLI) — c'est le drapeau qui "
+        "porte le chiffre du README : 12/12 top-1 sur bench/corpus (11/12 en standard)",
+    )
+    parser.add_argument(
         "--avec-echecs",
         action="store_true",
         help="ajoute les requêtes de bench/echecs_reels.jsonl (banc vivant, v1.6 §F, type "
@@ -247,6 +253,8 @@ def main() -> None:
         build_kwargs["doc_weight"] = _parse_doc_weight(args.doc_weight)
     if args.no_path_tokens:
         build_kwargs["index_paths"] = False
+    if args.grilles_typees:
+        build_kwargs["grilles_typees"] = True
     # --rerank implique --rerank-vectors au build : sans rerank.msrv, idx.search(rerank=True)
     # échouerait — le banc n'a pas de sens à demander la recherche sans le construire.
     # --rerank-lambda/--rerank-depth validés MAINTENANT (avant le build, potentiellement long) :

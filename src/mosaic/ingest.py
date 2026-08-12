@@ -81,8 +81,7 @@ def _resoudre_markitdown() -> None:
 
 
 # Crochet OCR (v1.5) : documents muets (convertible dont la conversion markitdown
-# rend < 200 caractères). Provider PAR DÉFAUT = rapidocr (paquet unifié RapidAI,
-# validé par Alex le 09/08) avec repli sur l'ancien rapidocr_onnxruntime ; les PDF
+# rend < 200 caractères). Provider PAR DÉFAUT = rapidocr (paquet unifié RapidAI) avec repli sur l'ancien rapidocr_onnxruntime ; les PDF
 # sont rastérisés par pypdfium2. Tout est sous garde — sans les paquets, la
 # détection dégrade proprement (available_ocr() False), jamais lever à l'import.
 # Import PARESSEUX (v2.0) : rapidocr tire onnxruntime, qui au chargement sous Linux émet
@@ -281,7 +280,7 @@ def to_text(path: Path, cache_dir: Path | None = None, ocr: bool = False) -> str
             if not available_ocr():
                 raise ValueError(
                     "--ocr demandé mais aucun moteur OCR disponible — "
-                    'pip install "rapidocr_onnxruntime" (provider par défaut, non installé)'
+                    'pip install "mosaic-index[ocr]" (provider OCR non installé)'
                 )
             text = ocr_provider(path)
         # trop_lourde, ou ocr=False : text reste None (ignorée+comptée par l'appelant)
@@ -296,7 +295,7 @@ def to_text(path: Path, cache_dir: Path | None = None, ocr: bool = False) -> str
             if not available_ocr():
                 raise ValueError(
                     "--ocr demandé mais aucun moteur OCR disponible — "
-                    'pip install "rapidocr_onnxruntime" (provider par défaut, non installé)'
+                    'pip install "mosaic-index[ocr]" (provider OCR non installé)'
                 )
             ocr_text = ocr_provider(path)
             if ocr_text is not None:

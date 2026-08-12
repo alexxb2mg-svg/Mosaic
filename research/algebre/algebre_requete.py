@@ -1,4 +1,4 @@
-"""Prototype — ALGÈBRE DE REQUÊTE par connecteurs (idée d'Alex).
+"""Prototype — ALGÈBRE DE REQUÊTE par connecteurs.
 
 Une requête n'est pas un sac de mots : les connecteurs (« et/ou/avec » = renforcer,
 « sans/pas/ni » = soustraire, « mais pas » = contraste négatif) sont des OPÉRATEURS sur les

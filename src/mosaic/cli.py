@@ -176,8 +176,9 @@ def main(argv: list[str] | None = None) -> int:
         help="index à GRILLES TYPÉES (v4) : chaque type de donnée dans SA grille "
         "(sens/réf/chemin, extensible par le profil), poids et lissage par grille, "
         "dimensions taillées au vocabulaire — la recherche route et synthétise "
-        "(pondération idf + préséance identifiant). Mesuré : noyade de réfs "
-        "0.27 -> 0.86, même qualité au quart du budget mémoire",
+        "(pondération idf + préséance identifiant). Mesuré sur le vrai moteur "
+        "(500 articles réels) : noyade de réfs 0.825 -> 0.90, grille sens 4x plus "
+        "petite quand le vocabulaire le permet (croissance auto sinon)",
     )
     p_build.add_argument(
         "--hybride",

@@ -189,10 +189,14 @@ mosaic build ./docs -o ./index --grilles-typees
 mosaic search "a9f77216 breaker" ./index    # the synthesis routes by itself
 ```
 
-Measured on 500 real product records against the standard engine *with* its facet-based
-ref boost: a reference drowned in noise words **0.90 vs 0.825**, bare reference 0.9833 vs
-0.975, cross-vendor join 1.0 on both sides, plain designations 0.9333 vs 0.9667 — with a
-meaning grid **4× smaller** (3,072 dims vs 12,288). On prose with nothing to sort
+Measured on 500 real product records (private corpus — the replayable public counterpart
+is the bundled bench: `python bench/run_bench.py bench/corpus bench/verite.jsonl
+--grilles-typees`, 12/12 top-1 vs 11/12 standard) against the standard engine *with* its
+facet-based ref boost: a reference drowned in noise words **0.90 vs 0.825**, bare
+reference 0.9833 vs 0.975, cross-vendor join 1.0 on both sides, plain designations 0.9333
+vs 0.9667 — with a meaning grid **4× smaller** (3,072 dims vs 12,288) when the vocabulary
+allows it (grid dimensions grow automatically with vocabulary, so the saving is
+corpus-dependent). On prose with nothing to sort
 (Alloprof) it is neutral-to-slightly-negative, so it stays **opt-in per corpus**, never a
 default. Existing indexes remain readable and searchable unchanged. `--rerank` works on a
 typed index (build with `--grilles-typees --rerank-vectors`): the λ·synthesis +
