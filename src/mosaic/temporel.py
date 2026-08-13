@@ -27,14 +27,38 @@ SEUIL_VERSION_DEFAUT = 0.55
 # cas particulier nulle part. Nommée ici parce que c'est ici qu'elle est produite.
 SANS_DATE = "0000-00-00"
 _DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+# Format compact AAAAMMJJ (convention massive des corpus compta/chantiers :
+# `20260622_Fournisseur_BL_9990001.pdf`, `..._20260630.md`) — 973/1271 docs compta étaient
+# sans date faute de le lire. Gardes contre les références numériques : fenêtre de
+# 8 chiffres ISOLÉE (pas de chiffre adjacent), année 19xx/20xx, mois et jour valides.
+_DATE_COMPACTE = re.compile(
+    r"(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)"
+)
+# Classement par dossier `AAAA/MM-Mois` (ou `AAAA_MM-Mois` en préfixe de nom) : date de
+# classement VOULUE, granularité mois. Le tiret doit ouvrir un libellé (lettre) pour ne
+# jamais lire `2024/12-31` comme un dossier de mois. Jour « 00 » : trie en tête du mois
+# par ordre de chaîne, et reste devant la sentinelle 0000-00-00 — aucun consommateur ne
+# parse ces dates en datetime (tri chaîne uniquement, cf. facettes.appliquer).
+_DATE_DOSSIER = re.compile(r"(?<!\d)((?:19|20)\d{2})[/_](0[1-9]|1[0-2])-(?=[^\W\d_])")
 
 
 def date_du_chemin(doc_id: str) -> str:
-    """Date AAAA-MM-JJ trouvée dans le chemin/nom du document ; SANS_DATE si absente."""
-    m = _DATE.search(doc_id.replace("\\", "/").rsplit("/", 1)[-1]) or _DATE.search(
-        doc_id
+    """Date AAAA-MM-JJ trouvée dans le chemin/nom du document ; SANS_DATE si absente.
+
+    Priorité : tirets explicites, puis compact AAAAMMJJ (nom de fichier d'abord,
+    chemin ensuite pour chacun), puis classement par dossier AAAA/MM- (mois seul)."""
+    chemin = doc_id.replace("\\", "/")
+    nom = chemin.rsplit("/", 1)[-1]
+    m = (
+        _DATE.search(nom)
+        or _DATE.search(doc_id)
+        or _DATE_COMPACTE.search(nom)
+        or _DATE_COMPACTE.search(doc_id)
     )
-    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else SANS_DATE
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    d = _DATE_DOSSIER.search(chemin)
+    return f"{d.group(1)}-{d.group(2)}-00" if d else SANS_DATE
 
 
 def versions_actuelles(
