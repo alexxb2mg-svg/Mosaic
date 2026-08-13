@@ -105,6 +105,17 @@ tunes the weights on *your* ground truth.
   recommending a change only when the gain is clear.
 - **MCP server** (`infra_mcp/`) — all of the above as 11 MCP tools, dynamic domain
   discovery, zero dependencies beyond the engine.
+- **Alternative document converter** (opt-in, `MOSAIC_CONVERTISSEUR=anydoc`) — the
+  default reader is markitdown; `firecrawl-anydoc` (pure Rust, no transitive
+  dependency, no model) can replace it. Measured on 15 real supplier quotes: far more
+  regular structure — one article per table row, and product names that markitdown cut
+  in half across the layout come back **whole** — which cut unattachable fragments
+  downstream by **7×**, at 31× the conversion speed. Deterministic (8 documents × 3
+  conversions, identical output). Strictly opt-in and **recorded in the index
+  metadata**: a different converter means different text, therefore different grids —
+  two indexes read by different converters are not comparable, and `add()` refuses to
+  mix them. Trade-off: anydoc *refuses* PDFs with no text layer (`OCR is required`)
+  where markitdown returned partial text; the existing OCR hook takes over.
 
 ## Choose your setup — the measured terrain map
 
@@ -150,7 +161,8 @@ next step.
 
 ```bash
 pip install -e ".[dev,ingest]"        # core + document conversion
-# optional extras: .[ocr] (scanned documents), .[rerank] (model2vec channels)
+# optional extras: .[ocr] (scanned documents), .[rerank] (model2vec channels),
+#                  .[ingest-rapide] (alternative converter, see below)
 
 mosaic build ./my_documents -o ./index_docs
 mosaic search "how do I wire the differential breaker" ./index_docs --top 5

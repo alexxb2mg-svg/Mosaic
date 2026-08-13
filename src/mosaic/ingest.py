@@ -11,6 +11,7 @@ try/except : sans l'extra `ingest`, Mosaic continue de fonctionner comme avant
 """
 
 import hashlib
+import os
 from pathlib import Path
 
 CONVERTIBLE_EXTS = {".pdf", ".docx", ".xlsx", ".html", ".pptx"}
@@ -78,6 +79,87 @@ def _resoudre_markitdown() -> None:
         except ImportError:
             _MI = None  # ty: ignore[invalid-assignment]  # repli garde dépendance optionnelle
         MarkItDown = _MI  # ty: ignore[invalid-assignment]
+
+
+# Convertisseur ALTERNATIF (opt-in, 13/08) : firecrawl-anydoc — Rust pur, aucune
+# dépendance transitive, aucun modèle. Mesuré sur 15 devis fournisseurs réels contre
+# markitdown : structure nettement plus régulière (une ligne d'article = une ligne de
+# tableau, désignations coupées par la mise en page RECOLLÉES), 7 fois moins de
+# fragments non rattachables en aval, conversion 31x plus rapide. Déterministe
+# (8 documents x3 conversions : sorties identiques au bit près).
+#
+# OPT-IN STRICT par `MOSAIC_CONVERTISSEUR=anydoc` : le texte produit diffère de celui
+# de markitdown, donc les grilles diffèrent — un basculement silencieux périmerait
+# sémantiquement tout index existant. Le convertisseur retenu est TRACÉ dans le meta
+# de l'index (cf. `convertisseur_effectif`), pour qu'un index sache toujours comment
+# il a été lu.
+#
+# Différence de contrat assumée : anydoc REFUSE les PDF sans couche texte
+# (« OCR is required ») là où markitdown rendait un texte vide ou partiel. Le refus
+# est plus honnête ; le crochet OCR existant prend le relais.
+_ANYDOC_NON_TENTE = object()
+anydoc = _ANYDOC_NON_TENTE  # ty: ignore[invalid-assignment]  # résolu paresseusement
+
+
+def _resoudre_anydoc() -> None:
+    """Tente l'import du module `anydoc` UNE seule fois (module ou None)."""
+    global anydoc
+    if anydoc is _ANYDOC_NON_TENTE:
+        try:
+            import anydoc as _AD  # ty: ignore[unresolved-import]
+        except ImportError:
+            _AD = None  # ty: ignore[invalid-assignment]  # dépendance optionnelle
+        anydoc = _AD  # ty: ignore[invalid-assignment]
+
+
+def available_anydoc() -> bool:
+    """True si le convertisseur alternatif est importable (extra `ingest-rapide`)."""
+    _resoudre_anydoc()
+    return anydoc is not None
+
+
+def convertisseur_demande() -> str:
+    """Convertisseur demandé par l'environnement : « anydoc » ou « markitdown »
+    (défaut). Aucune autre valeur n'est acceptée silencieusement."""
+    val = os.environ.get("MOSAIC_CONVERTISSEUR", "").strip().lower()
+    if val in ("anydoc", "markitdown"):
+        return val
+    if val:
+        raise ValueError(
+            f"MOSAIC_CONVERTISSEUR={val!r} inconnu — valeurs acceptées : "
+            "'markitdown' (défaut) ou 'anydoc'"
+        )
+    return "markitdown"
+
+
+def convertisseur_effectif() -> str:
+    """Ce qui sera RÉELLEMENT utilisé — à tracer dans le meta d'un index. Demander
+    « anydoc » sans l'avoir installé est un refus net, jamais un repli muet : deux
+    index lus par des convertisseurs différents ne sont pas comparables."""
+    demande = convertisseur_demande()
+    if demande == "anydoc" and not available_anydoc():
+        raise ValueError(
+            "MOSAIC_CONVERTISSEUR=anydoc mais le paquet n'est pas installé — "
+            'pip install "mosaic-index[ingest-rapide]" (attention : le paquet PyPI '
+            "s'appelle firecrawl-anydoc, `anydoc` tout court est un homonyme sans rapport)"
+        )
+    return demande
+
+
+def _convertir_anydoc(path: Path) -> str | None:
+    """Conversion par anydoc. None si le document est refusé (PDF scanné : le crochet
+    OCR prend alors le relais, exactement comme pour un markitdown muet)."""
+    _resoudre_anydoc()
+    module = anydoc
+    if module is None:
+        return None
+    try:
+        # getattr : le global est typé par sa sentinelle d'import paresseux, le
+        # vérificateur ne peut pas voir le module réel derrière (même motif que
+        # markitdown/rapidocr, qui passent par des classes)
+        return getattr(module, "to_markdown")(str(path))
+    except Exception:
+        return None
 
 
 # Crochet OCR (v1.5) : documents muets (convertible dont la conversion markitdown
@@ -232,6 +314,14 @@ def _cache_key(path: Path, ocr: bool = False) -> str:
     raw = f"{path}|{st.st_mtime_ns}|{st.st_size}"
     if ocr:
         raw += "-ocr"
+    conv = convertisseur_demande()
+    if conv != "markitdown":
+        # MÊME piège que le drapeau ocr, et il aurait été silencieux : sans le
+        # convertisseur dans la clé, un basculement vers anydoc resservait le texte
+        # markitdown mis en cache — un index « anydoc » construit sur du texte
+        # markitdown, sans le moindre signe. Les clés historiques restent
+        # inchangées (suffixe ajouté seulement hors défaut).
+        raw += f"-{conv}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -285,7 +375,12 @@ def to_text(path: Path, cache_dir: Path | None = None, ocr: bool = False) -> str
             text = ocr_provider(path)
         # trop_lourde, ou ocr=False : text reste None (ignorée+comptée par l'appelant)
     else:
-        if available():
+        if convertisseur_effectif() == "anydoc":
+            # Convertisseur alternatif (opt-in) : un refus (PDF scanné) laisse
+            # `text` à None et tombe sur le crochet OCR ci-dessous — même chemin
+            # qu'un markitdown muet, aucun cas nouveau à traiter.
+            text = _convertir_anydoc(path)
+        elif available():
             try:
                 text = _get_converter().convert(path).text_content
             except Exception:

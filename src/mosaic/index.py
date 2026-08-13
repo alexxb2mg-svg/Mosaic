@@ -116,6 +116,7 @@ class Index:
         atlas_norms: np.ndarray | None = None,
         gram_mat: np.ndarray | None = None,
         gram_norms: np.ndarray | None = None,
+        convertisseur: str | None = None,
     ) -> None:
         self.index_dir = index_dir
         self.profiles = profiles
@@ -139,6 +140,15 @@ class Index:
         self.rerank_model = rerank_model
         self.index_paths = index_paths
         self.ocr = ocr
+        # Convertisseur d'ingestion (opt-in MOSAIC_CONVERTISSEUR). À la CONSTRUCTION
+        # il vient de l'environnement ; à la RÉOUVERTURE il vient du meta — un index
+        # porte le convertisseur qui l'a lu, jamais celui de l'environnement courant
+        # (sinon un add() dans un autre env réécrirait un meta mensonger).
+        self.convertisseur = (
+            convertisseur
+            if convertisseur is not None
+            else ingest.convertisseur_effectif()
+        )
         # Canal de relations (v2.0, opt-in --relations) : relations_mat est None quand
         # l'index n'a pas de relations.msrel (défaut, comportement v1.6 inchangé). Non
         # None -> matrice int8 N×dim + normes alignées sur `ids`, manifeste
@@ -743,6 +753,9 @@ class Index:
         # surtout à un add() ultérieur (jamais d'injection/OCR qu'un build n'avait pas).
         index_paths = bool(meta.get("index_paths", False))
         ocr = bool(meta.get("ocr", False))
+        # Convertisseur d'ORIGINE (absent des métas antérieurs = markitdown, le défaut
+        # historique) : c'est lui qui a produit le texte de cet index, pas l'environnement.
+        convertisseur = str(meta.get("convertisseur", "markitdown"))
         rerank_vecs = None
         rerank_model = None
         loaded_rerank = load_rerank(index_dir)
@@ -833,6 +846,7 @@ class Index:
             rerank_model=rerank_model,
             index_paths=index_paths,
             ocr=ocr,
+            convertisseur=convertisseur,
             relations_mat=relations_mat,
             relations_norms=relations_norms,
             relations_manifest=relations_manifest,
@@ -860,6 +874,11 @@ class Index:
             "index_paths": self.index_paths,
             "ocr": self.ocr,
         }
+        if self.convertisseur != "markitdown":
+            # Le convertisseur change le TEXTE lu, donc les grilles : deux index lus
+            # par des convertisseurs différents ne sont pas comparables. Tracé dès
+            # qu'il sort du défaut (les métas historiques restent inchangés).
+            extra_meta["convertisseur"] = self.convertisseur
         if self.profil is not None:
             extra_meta["profil"] = self.profil
         if self.embeddings is not None and self.embed_path is not None:
@@ -991,6 +1010,16 @@ class Index:
             raise ValueError(
                 "model2vec non installé — impossible de mettre à jour rerank.msrv "
                 '(pip install "model2vec==0.8.2")'
+            )
+        courant = ingest.convertisseur_effectif()
+        if courant != self.convertisseur:
+            # Ajouter un document lu par un AUTRE convertisseur mélangerait deux
+            # textes de natures différentes dans le même espace sémantique — les
+            # scores du nouveau document ne seraient comparables à aucun autre.
+            raise ValueError(
+                f"index lu par « {self.convertisseur} », environnement demande "
+                f"« {courant} » : add() refusé — reconstruire l'index avec le "
+                "convertisseur voulu, ou aligner MOSAIC_CONVERTISSEUR"
             )
 
     def _add_flux(
@@ -1322,6 +1351,7 @@ class Index:
             "ignores": self.ignores,
             "index_paths": self.index_paths,
             "ocr": self.ocr,
+            "convertisseur": self.convertisseur,
         }
         # δ (poids du thème) demandé mais pas de table d'embeddings : le canal document est
         # inactif (nécessite l'artefact .msee, cf. mosaic.encoder.doc_channel), le moteur
