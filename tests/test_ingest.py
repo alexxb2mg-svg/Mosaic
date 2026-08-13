@@ -453,12 +453,12 @@ def test_to_text_image_ocr_sans_provider_leve_erreur_claire(tmp_path, monkeypatc
         ingest.to_text(f, ocr=True)
 
 
-def test_to_text_image_trop_lourde_ignoree_meme_avec_ocr_provider_non_appele(
+def test_to_text_image_trop_lourde_reste_un_document_muet_provider_non_appele(
     tmp_path, monkeypatch
 ):
-    """Garde de volume v1.6 §B : une image > 12 Mo est ignorée+comptée (scan aberrant),
-    sans même consulter le provider OCR (le seuil est un garde-fou de temps, pas une
-    tentative avortée)."""
+    """Garde de volume v1.6 §B : une image > 12 Mo ne passe PAS par l'OCR (le seuil est
+    un garde-fou de temps). Mais elle reste un DOCUMENT — chaîne vide, pas None : la
+    garde protège l'OCR, qui est coûteux, pas l'indexation, qui est gratuite."""
     provider_calls = []
     monkeypatch.setattr(ingest, "available_ocr", lambda: True)
     monkeypatch.setattr(
@@ -474,7 +474,7 @@ def test_to_text_image_trop_lourde_ignoree_meme_avec_ocr_provider_non_appele(
 
     text = ingest.to_text(f, ocr=True)
 
-    assert text is None
+    assert text == ""
     assert len(provider_calls) == 0
 
 
@@ -490,14 +490,27 @@ def test_to_text_image_sous_le_seuil_de_volume_ocr_normalement(tmp_path, monkeyp
     assert ingest.to_text(f, ocr=True) == "texte océrisé"
 
 
-def test_to_text_image_provider_echoue_retombe_sur_none_sans_crash(
-    tmp_path, monkeypatch
-):
+def test_to_text_image_sans_texte_detecte_reste_un_document_muet(tmp_path, monkeypatch):
+    """LE cas des photos de chantier : le provider ne reconnaît aucun texte (une photo
+    de tableau câblé n'en contient pas). Le fichier reste un document — chaîne vide —
+    parce que son chemin nomme le chantier et ses facettes portent type et date.
+
+    Ce test disait `is None` avant le 13/08, et c'est ce None que l'appelant jetait :
+    310 fichiers absents de l'index chantiers, introuvables même par leur dossier."""
     monkeypatch.setattr(ingest, "available_ocr", lambda: True)
     monkeypatch.setattr(ingest, "ocr_provider", lambda path: None)
     f = tmp_path / "plaque.tiff"
     f.write_bytes(b"peu importe")
-    assert ingest.to_text(f, ocr=True) is None
+    assert ingest.to_text(f, ocr=True) == ""
+
+
+def test_to_text_image_sans_ocr_demande_reste_ignoree(tmp_path, monkeypatch):
+    """Sans --ocr, comportement d'origine STRICTEMENT inchangé : l'utilisateur n'a pas
+    demandé qu'on exploite ses images, on ne se met pas à indexer ses logos."""
+    monkeypatch.setattr(ingest, "available_ocr", lambda: True)
+    f = tmp_path / "logo.png"
+    f.write_bytes(b"peu importe")
+    assert ingest.to_text(f, ocr=False) is None
 
 
 # -- Index.build/add : intégration -----------------------------------------------------------
@@ -759,9 +772,10 @@ def test_build_image_avec_ocr_indexee_via_provider_factice(tmp_path, monkeypatch
     assert hits[0]["id"] == "plaque.jpg"
 
 
-def test_build_image_trop_lourde_ignoree_et_comptee_meme_avec_ocr(
-    tmp_path, monkeypatch
-):
+def test_build_image_trop_lourde_indexee_sans_ocr(tmp_path, monkeypatch):
+    """Bout en bout : l'image géante n'est pas océrisée mais elle EST dans l'index, et
+    plus dans le compteur d'ignorés — « ignoré » doit vouloir dire « pas su lire », pas
+    « rien à lire »."""
     monkeypatch.setattr(ingest, "available_ocr", lambda: True)
     monkeypatch.setattr(ingest, "ocr_provider", lambda path: "ne doit jamais servir")
     corpus = tmp_path / "corpus"
@@ -773,8 +787,28 @@ def test_build_image_trop_lourde_ignoree_et_comptee_meme_avec_ocr(
 
     idx = Index.build(corpus, tmp_path / "idx", grid=GRID, ocr=True)
 
-    assert idx.ids == []
-    assert idx.stats()["ignores"] == 1
+    assert idx.ids == ["scan_geant.jpg"]
+    assert idx.stats()["ignores"] == 0
+
+
+def test_build_photo_muette_reste_trouvable_par_son_chantier(tmp_path, monkeypatch):
+    """Le cas d'usage qui a motivé la correction : une photo sans texte, rangée dans le
+    dossier d'un chantier, doit remonter sur le NOM DU CHANTIER — c'est tout ce qu'on
+    demande d'elle, et c'est gratuit (`index_paths` indexe les segments de chemin)."""
+    monkeypatch.setattr(ingest, "available_ocr", lambda: True)
+    monkeypatch.setattr(ingest, "ocr_provider", lambda path: None)  # photo sans texte
+    corpus = tmp_path / "corpus"
+    (corpus / "chantier_bellevue" / "photos").mkdir(parents=True)
+    (corpus / "chantier_bellevue" / "photos" / "IMG_2043.jpg").write_bytes(b"jpeg")
+    (corpus / "note.md").write_text(
+        "plomberie sanitaire raccordement cuivre", encoding="utf-8"
+    )
+
+    idx = Index.build(corpus, tmp_path / "idx", grid=GRID, ocr=True, index_paths=True)
+
+    assert "chantier_bellevue/photos/IMG_2043.jpg" in idx.ids
+    hits = idx.search("bellevue", k=2)
+    assert any(h["id"].startswith("chantier_bellevue/") for h in hits)
 
 
 def test_add_image_suit_ocr_persiste_du_build(tmp_path, monkeypatch):

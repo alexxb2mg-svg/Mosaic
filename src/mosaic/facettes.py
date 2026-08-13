@@ -14,8 +14,9 @@ import json
 import re
 from pathlib import Path
 
+from mosaic import exif
 from mosaic.ingest import type_semantique
-from mosaic.temporel import date_du_chemin
+from mosaic.temporel import SANS_DATE, date_du_chemin
 
 FICHIER = "facettes.json"
 K_RRF = 60  # constante de fusion de rangs (même valeur que la méta-recherche)
@@ -62,9 +63,18 @@ def extraire(
     `profil` (optionnel) adapte types custom et critère de réfs à l'environnement."""
     profil = profil or {}
     refs = refs_du_texte(f"{doc_id} {texte or ''}", profil.get("refs"))
+    # Le chemin fait foi quand il porte une date : c'est un classement VOULU. L'EXIF
+    # ne prend le relais que sur les documents autrement sans date — typiquement une
+    # photo de chantier (`IMG_2043.jpg`), qui tombait sinon à « 0000-00-00 » et
+    # restait hors de portée de `--recence` et de `mosaic actuel`. Mesuré sur le
+    # corpus chantiers : 183 des 1 009 JPEG récupèrent ainsi une date exacte, et le
+    # parseur maison est équivalent à Pillow sur ce corpus (183 accords, 0 écart).
+    date = date_du_chemin(doc_id)
+    if date == SANS_DATE:
+        date = exif.date_de_prise_de_vue(path) or SANS_DATE
     fac: dict = {
         "type": type_semantique(path, texte, profil.get("types")),
-        "date": date_du_chemin(doc_id),
+        "date": date,
     }
     if refs:
         fac["refs"] = refs
@@ -115,7 +125,7 @@ def appliquer(
     enrichis: list[dict] = []
     for h in hits:
         fac = facettes.get(h["id"], {})
-        h = {**h, "type": fac.get("type", "?"), "date": fac.get("date", "0000-00-00")}
+        h = {**h, "type": fac.get("type", "?"), "date": fac.get("date", SANS_DATE)}
         if type_filtre is not None and h["type"] != type_filtre:
             continue
         communes = cherchees & set(fac.get("refs", ())) if cherchees else set()

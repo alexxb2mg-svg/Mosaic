@@ -366,14 +366,22 @@ def to_text(path: Path, cache_dir: Path | None = None, ocr: bool = False) -> str
             trop_lourde = path.stat().st_size > _OCR_MAX_IMAGE_BYTES
         except OSError:
             trop_lourde = False
-        if not trop_lourde and ocr:
+        if ocr:
             if not available_ocr():
                 raise ValueError(
                     "--ocr demandé mais aucun moteur OCR disponible — "
                     'pip install "mosaic-index[ocr]" (provider OCR non installé)'
                 )
-            text = ocr_provider(path)
-        # trop_lourde, ou ocr=False : text reste None (ignorée+comptée par l'appelant)
+            # Une image PRÉSENTE est un document, qu'on en tire du texte ou non : son
+            # chemin nomme le chantier, ses facettes portent le type et la date (EXIF).
+            # Rendre None ici — cas d'une photo sans texte détectable, ou trop lourde
+            # pour l'OCR — la faisait JETER par l'appelant (`index.py`, `continue`) :
+            # 310 fichiers absents de l'index chantiers, introuvables même par le nom
+            # de leur dossier. La chaîne vide dit « lu, muet », None dit « pas su lire » ;
+            # le pipeline confondait les deux et jetait les deux.
+            text = "" if trop_lourde else (ocr_provider(path) or "")
+        # ocr=False : text reste None, comportement d'origine strictement inchangé —
+        # sans --ocr, l'utilisateur n'a pas demandé qu'on exploite ses images.
     else:
         if convertisseur_effectif() == "anydoc":
             # Convertisseur alternatif (opt-in) : un refus (PDF scanné) laisse
@@ -395,6 +403,12 @@ def to_text(path: Path, cache_dir: Path | None = None, ocr: bool = False) -> str
             ocr_text = ocr_provider(path)
             if ocr_text is not None:
                 text = ocr_text
+            elif text is None:
+                # Même raison que pour les images, même famille de bugs : un PDF
+                # entièrement graphique (plan scanné sans cartouche, schéma) que ni
+                # markitdown ni l'OCR ne font parler reste un document — il a un
+                # chemin, un type et une date. Ne pas le jeter.
+                text = ""
 
     if text is None:
         return None

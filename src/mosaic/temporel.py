@@ -22,15 +22,19 @@ from collections.abc import Callable
 import numpy as np
 
 SEUIL_VERSION_DEFAUT = 0.55
+# Sentinelle « aucune date connue ». Choisie pour trier naturellement en queue d'un
+# classement décroissant par chaîne — les documents sans date tombent derrière, sans
+# cas particulier nulle part. Nommée ici parce que c'est ici qu'elle est produite.
+SANS_DATE = "0000-00-00"
 _DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 
 
 def date_du_chemin(doc_id: str) -> str:
-    """Date AAAA-MM-JJ trouvée dans le chemin/nom du document ; '0000-00-00' si absente."""
+    """Date AAAA-MM-JJ trouvée dans le chemin/nom du document ; SANS_DATE si absente."""
     m = _DATE.search(doc_id.replace("\\", "/").rsplit("/", 1)[-1]) or _DATE.search(
         doc_id
     )
-    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else "0000-00-00"
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else SANS_DATE
 
 
 def versions_actuelles(

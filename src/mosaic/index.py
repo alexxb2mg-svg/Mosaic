@@ -8,6 +8,7 @@ from mosaic import GRID_DEFAULT, ingest, queries
 from mosaic import rerank as rerank_module
 from mosaic import facettes as facettes_module
 from mosaic import profil as profil_module
+from mosaic import journal as journal_module
 from mosaic import requete as requete_module
 from mosaic.bm25 import Bm25
 from mosaic import typage as typage_module
@@ -1220,7 +1221,64 @@ class Index:
         Boost réf AUTOMATIQUE : si la requête contient un code-like (réf produit, numéro de
         devis/commande — >= 5 caractères mixtes ou >= 6 chiffres), les documents qui portent ce
         code EXACTEMENT prennent la tête (`ref_exacte`). Se désactive silencieusement sans
-        facettes.json (rien n'a été demandé explicitement)."""
+        facettes.json (rien n'a été demandé explicitement).
+
+        Journal (opt-in, `MOSAIC_JOURNAL`) : cette méthode est une ENVELOPPE autour de
+        `_search`, qui garde les cinq points de retour d'origine. Journaliser à chacun
+        d'eux aurait été fragile — on en oublie un, ou le prochain ajout casse
+        l'invariant sans que rien ne le signale. Ici il n'y a qu'une seule sortie, donc
+        aucune recherche ne peut échapper au journal. Voir `mosaic.journal`."""
+        hits = self._search(
+            text,
+            k,
+            rerank,
+            rerank_lambda,
+            rerank_depth,
+            type_filtre,
+            recence,
+            fusion,
+            grammatical,
+            nettoyer_requete,
+        )
+        if journal_module.actif() is not None:
+            # Seules les options NON par défaut sont consignées : une ligne de journal
+            # se relit à l'œil, dix champs à `false` la rendraient illisible.
+            options = {
+                nom: valeur
+                for nom, valeur in (
+                    ("rerank", rerank),
+                    ("type", type_filtre),
+                    ("recence", recence),
+                    ("fusion", fusion),
+                    ("grammatical", grammatical),
+                    ("nettoyage", nettoyer_requete),
+                )
+                if valeur
+            }
+            journal_module.consigner(self.index_dir_nom(), text, k, options, hits)
+        return hits
+
+    def index_dir_nom(self) -> str:
+        """Le nom de l'index tel qu'il apparaîtra dans le journal. Le NOM du dossier,
+        pas son chemin complet : un journal ne doit pas trimballer l'arborescence du
+        poste, et `index_chantiers` suffit à distinguer les corpus."""
+        chemin = getattr(self, "index_dir", None)
+        return Path(chemin).name if chemin else "?"
+
+    def _search(
+        self,
+        text: str,
+        k: int = 10,
+        rerank: bool = False,
+        rerank_lambda: float = 0.70,
+        rerank_depth: int = 50,
+        type_filtre: str | None = None,
+        recence: float = 0.0,
+        fusion: bool = False,
+        grammatical: bool = False,
+        nettoyer_requete: bool = False,
+    ) -> list[dict]:
+        """Le corps historique de `search`, inchangé. Voir l'enveloppe ci-dessus."""
         if fusion and rerank:
             raise ValueError(
                 "fusion et rerank sont exclusifs : la fusion intègre déjà le canal "
