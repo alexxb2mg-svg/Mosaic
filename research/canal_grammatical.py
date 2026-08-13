@@ -31,6 +31,23 @@ PRÉDICTIONS DÉCLARÉES AVANT LA MESURE (13/08, 22h50)
          n'exerce pas sa fonction n'est pas jugé, il est calomnié.
 
 Usage : python research/canal_grammatical.py
+        python research/canal_grammatical.py --corpus <dossier> --verite <verite.jsonl>
+
+MESURE 2 — ALLOPROF (14/08). La première mesure (corpus interne, 40 requêtes,
+recouvrement TOTAL) ne condamne pas la brique : 40 requêtes dont 6 seulement
+exerçaient la fonction. Alloprof (2 316 requêtes de vrai français d'élèves) est le
+terrain que ce canal vise. PRÉDICTIONS DÉCLARÉES AVANT LA MESURE (14/08, 00h50) :
+
+  P-G1-allo — le grammatical seul reste sous 50 % du rappel de la grille (il encode
+              la structure de l'énoncé, pas son sujet — vrai à toute échelle).
+  P-G2-allo — à 2 316 requêtes, il rattrape AU MOINS une requête que la grille rate.
+  P-G3-allo — la matière grammaticale (négation, position, passif) est présente dans
+              plus de 10 % des requêtes d'élèves (le français scolaire en regorge).
+
+CRITÈRE DE DÉCISION, déclaré avant : le canal ne justifie une place en FUSION que si
+les rattrapages atteignent 1 % des requêtes (≥ 24 sur Alloprof). En dessous, il reste
+hors fusion et la piste D3 (portage documenté, invitation à contribuer) est sa seule
+suite — quelle que soit l'élégance de la mécanique.
 """
 
 from __future__ import annotations
@@ -84,10 +101,17 @@ def evaluer(idx: Index, requetes: list[dict], k: int, *, grammatical: bool):
 
 
 def main() -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--corpus", type=Path, default=CORPUS)
+    ap.add_argument("--verite", type=Path, default=REQUETES)
+    args = ap.parse_args()
+
     k = 10
     requetes = [
         json.loads(li)
-        for li in REQUETES.read_text(encoding="utf-8").splitlines()
+        for li in args.verite.read_text(encoding="utf-8").splitlines()
         if li.strip()
     ]
 
@@ -108,7 +132,7 @@ def main() -> int:
         # UN SEUL index : le canal grammatical est stocké à côté de la grille, il ne la
         # modifie pas. Les deux bras interrogent donc rigoureusement le même objet.
         idx = Index.build(
-            CORPUS,
+            args.corpus,
             Path(tmp) / "idx",
             embeddings_path=POTION,
             abtt=2,
@@ -156,9 +180,11 @@ def main() -> int:
         )
     )
 
-    Path(__file__).with_name("resultats_canal_grammatical.json").write_text(
+    suffixe = "" if args.corpus == CORPUS else f"_{args.corpus.parent.name}"
+    Path(__file__).with_name(f"resultats_canal_grammatical{suffixe}.json").write_text(
         json.dumps(
             {
+                "corpus": str(args.corpus),
                 "grille": grille,
                 "grammatical": gram,
                 "rattrapees": len(rattrapees),
