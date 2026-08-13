@@ -80,6 +80,9 @@ def test_seules_les_options_non_par_defaut_sont_ecrites(corpus, tmp_path, monkey
 def test_les_rangs_par_canal_survivent_en_fusion(corpus, tmp_path, monkeypatch):
     """C'est LE champ qui rend la redondance entre canaux mesurable sans annoter quoi
     que ce soit — si un canal ne remonte jamais rien d'inédit, il ne sert à rien."""
+    # --hybride force rerank_vectors, qui exige model2vec : sans lui le job « cœur » de
+    # la CI (extras non installés) échouait. Même garde que tests/test_fusion.py.
+    pytest.importorskip("model2vec")
     fichier = tmp_path / "recherches.jsonl"
     monkeypatch.setenv(journal.VARIABLE, str(fichier))
     idx = Index.build(corpus, tmp_path / "idx", grid=GRID, hybride=True)
