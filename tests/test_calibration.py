@@ -12,6 +12,29 @@ from mosaic.encoder import WEIGHTS_DEFAULT
 GRID = (32, 32, 3)
 
 
+def _table_embeddings(tmp_path, mots):
+    """Petite table .msee réelle — SANS elle, `calibrer` refuse (et il a raison :
+    sans table, le canal γ est inactif et les poids ne s'appliquent pas ; les
+    tests validaient alors un rapport qui ne mesurait rien, défaut trouvé par le
+    banc SciFact le 13/08)."""
+    import gzip
+
+    import numpy as np
+
+    from mosaic.embeddings import prepare
+
+    src = tmp_path / "mini.vec.gz"
+    lignes = [f"{len(mots)} 300"]
+    for i, mot in enumerate(mots):
+        rng = np.random.default_rng(i + 1)
+        lignes.append(mot + " " + " ".join(f"{v:.4f}" for v in rng.normal(size=300)))
+    with gzip.open(src, "wt", encoding="utf-8") as f:
+        f.write("\n".join(lignes) + "\n")
+    out = tmp_path / "table.msee"
+    prepare(src, out, keep=len(mots))
+    return out
+
+
 def _corpus(tmp_path):
     c = tmp_path / "corpus"
     c.mkdir(exist_ok=True)
@@ -40,9 +63,13 @@ REQUETES = [
 def test_calibrer_rapport_complet(tmp_path):
     """Le sweep tourne, le défaut est TOUJOURS dans le classement, le rapport est complet et
     le verdict de fiabilité honnête (3 requêtes < 10 -> non fiable)."""
+    table = _table_embeddings(
+        tmp_path, ["pate", "farine", "oeuf", "sel", "eau", "sucre", "beurre", "lait"]
+    )
     rapport = calibrer(
         _corpus(tmp_path),
         REQUETES,
+        embeddings_path=table,
         grille=[(0.5, 0.3, 0.2)],
         grid=GRID,
         smoothing_rank=0,
@@ -57,7 +84,16 @@ def test_calibrer_rapport_complet(tmp_path):
 
 def test_calibrer_valide_les_requetes(tmp_path):
     with pytest.raises(ValueError, match="relevant"):
-        calibrer(_corpus(tmp_path), [{"query": "x"}], grid=GRID, smoothing_rank=0)
+        calibrer(
+            _corpus(tmp_path),
+            [{"query": "x"}],
+            grid=GRID,
+            smoothing_rank=0,
+            embeddings_path=_table_embeddings(
+                tmp_path,
+                ["pate", "farine", "oeuf", "sel", "eau", "sucre", "beurre", "lait"],
+            ),
+        )
 
 
 def test_expliquer_calibration_fr_en(tmp_path):
@@ -67,6 +103,9 @@ def test_expliquer_calibration_fr_en(tmp_path):
         grille=[(0.5, 0.3, 0.2)],
         grid=GRID,
         smoothing_rank=0,
+        embeddings_path=_table_embeddings(
+            tmp_path, ["pate", "farine", "oeuf", "sel", "eau", "sucre"]
+        ),
     )
     fr = expliquer_calibration(rapport, langue="fr")
     assert "Recommandation" in fr and "MRR" in fr
@@ -110,8 +149,12 @@ def _corpus_long(tmp_path):
 def test_verite_auto_held_out(tmp_path):
     """La vérité déterministe (sans LLM) : générée du corpus, chaque requête retrouve son
     document parent, et le rapport porte la mention de sa nature et de sa limite."""
+    table = _table_embeddings(
+        tmp_path, ["pate", "farine", "oeuf", "sel", "eau", "sucre", "beurre", "lait"]
+    )
     rapport = calibrer(
         _corpus_long(tmp_path),
+        embeddings_path=table,
         grille=[(0.5, 0.3, 0.2)],
         grid=GRID,
         smoothing_rank=0,
@@ -122,6 +165,7 @@ def test_verite_auto_held_out(tmp_path):
     # reproductibilité : deux runs -> même rapport (déterminisme de la génération)
     rapport2 = calibrer(
         _corpus_long(tmp_path),
+        embeddings_path=table,
         grille=[(0.5, 0.3, 0.2)],
         grid=GRID,
         smoothing_rank=0,
@@ -135,9 +179,26 @@ def test_verite_auto_held_out(tmp_path):
 
 def test_verite_auto_exclusif_avec_requetes(tmp_path):
     with pytest.raises(ValueError, match="verite_auto"):
-        calibrer(_corpus_long(tmp_path), REQUETES, verite_auto=True, grid=GRID)
+        calibrer(
+            _corpus_long(tmp_path),
+            REQUETES,
+            verite_auto=True,
+            grid=GRID,
+            embeddings_path=_table_embeddings(
+                tmp_path,
+                ["pate", "farine", "oeuf", "sel", "eau", "sucre", "beurre", "lait"],
+            ),
+        )
     with pytest.raises(ValueError, match="requêtes-vérité|verite_auto"):
-        calibrer(_corpus_long(tmp_path), None, grid=GRID)
+        calibrer(
+            _corpus_long(tmp_path),
+            None,
+            grid=GRID,
+            embeddings_path=_table_embeddings(
+                tmp_path,
+                ["pate", "farine", "oeuf", "sel", "eau", "sucre", "beurre", "lait"],
+            ),
+        )
 
 
 def test_calibrer_index_paths_false_ignore_les_tokens_de_chemin(tmp_path):
@@ -151,6 +212,16 @@ def test_calibrer_index_paths_false_ignore_les_tokens_de_chemin(tmp_path):
     (c / "autre.md").write_text("document voisin egalement generique", encoding="utf-8")
     requetes = [{"query": "zzximo", "relevant": ["zzximo.md"]}]
 
-    avec = calibrer(c, requetes, grid=GRID, smoothing_rank=0)
-    sans = calibrer(c, requetes, grid=GRID, smoothing_rank=0, index_paths=False)
+    table = _table_embeddings(
+        tmp_path, ["pate", "farine", "oeuf", "sel", "eau", "sucre", "beurre", "lait"]
+    )
+    avec = calibrer(c, requetes, grid=GRID, smoothing_rank=0, embeddings_path=table)
+    sans = calibrer(
+        c,
+        requetes,
+        grid=GRID,
+        smoothing_rank=0,
+        embeddings_path=table,
+        index_paths=False,
+    )
     assert avec["defaut"]["mrr"] > sans["defaut"]["mrr"]

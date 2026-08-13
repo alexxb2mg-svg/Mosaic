@@ -66,6 +66,58 @@ def rrf_fuse(
     return ordre[:k]
 
 
+def znorm_fuse(listes: Iterable[tuple[str, list[dict]]], k: int = 10) -> list[dict]:
+    """Fusionne par scores Z-NORMALISÉS PAR SOURCE — pour des sources HOMOGÈNES.
+
+    Mesuré (`research/shards_fusion.py`, Alloprof découpé en 4 shards équilibrés,
+    2 316 requêtes) : **0.3832 R@10 / 0.2229 MRR, contre 0.3216 / 0.2164 pour
+    l'index unique** — la fusion bat l'index entier sur les DEUX métriques, là où
+    le RRF gagnait le rappel (0.3809) en payant la précision de tête (0.1713).
+
+    Lecture du gain : chaque shard apprend ses propres profils de cooccurrence, ses
+    erreurs se décorrèlent de celles des autres (même mécanisme que la fusion
+    multi-canaux), et la z-normalisation rend leurs échelles comparables sans
+    écraser l'écart entre le premier et le second — ce que le rang, lui, écrase.
+
+    QUAND L'UTILISER — et c'est la condition qui décide : des sources de MÊME
+    NATURE (un corpus découpé en tranches, idéalement de tailles voisines). Sur des
+    corpus HÉTÉROGÈNES (devis vs comptabilité vs chantiers), la z-normalisation
+    n'a pas de sens : deux distributions de scores portant sur des mondes différents
+    ne deviennent pas comparables parce qu'on les centre. C'est le RRF qui reste le
+    défaut de `mosaic meta`, et il n'est pas question de changer ça sans l'avoir
+    mesuré sur des corpus réellement hétérogènes.
+
+    Biais connu et non corrigé : sur des tranches de tailles TRÈS inégales, la
+    petite source reste sur-représentée (3.81x sa part mesurée sur un découpage
+    6/19/25/50 %). Pondérer les contributions par la part de corpus a été tenté et
+    ÉCHOUE (elle écrase totalement les petites sources, R@10 0.2051) — la correction
+    utile agirait sur la PROFONDEUR demandée à chaque source, pas sur le poids de
+    ses scores. D'où la règle de conception : viser des tranches équilibrées.
+    """
+    if k < 1:
+        raise ValueError("k doit être >= 1")
+    fusion: list[dict] = []
+    for source, resultats in listes:
+        scores = [float(r.get("score", 0.0)) for r in resultats]
+        if not scores:
+            continue
+        mu = sum(scores) / len(scores)
+        var = sum((s - mu) ** 2 for s in scores) / len(scores)
+        sigma = var**0.5 or 1.0  # source à scores identiques : pas d'échelle à corriger
+        for rang, (r, s) in enumerate(zip(resultats, scores, strict=True), start=1):
+            fusion.append(
+                {
+                    "index": source,
+                    "id": r["id"],
+                    "rang_local": rang,
+                    "score_local": round(s, 4),
+                    "score_z": round((s - mu) / sigma, 6),
+                }
+            )
+    fusion.sort(key=lambda x: (-x["score_z"], x["index"], x["rang_local"]))
+    return fusion[:k]
+
+
 def resume_par_index(listes: Iterable[tuple[str, list[dict]]]) -> list[dict]:
     """Diagnostic de RAPPEL : par source, le nombre de candidats et le meilleur score local.
     Un corpus dont le meilleur score reste très bas est probablement hors-sujet pour la question —

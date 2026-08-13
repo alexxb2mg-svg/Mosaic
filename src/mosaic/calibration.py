@@ -199,15 +199,26 @@ def calibrer(
                 raise ValueError(
                     f"requêtes-vérité : l'entrée {i} doit avoir 'query' et 'relevant' (non vide)"
                 )
+    if embeddings_path is None:
+        # DÉFAUT TROUVÉ PAR LE BANC ANGLAIS (13/08) : sans table d'embeddings, le
+        # canal γ est inactif et `Profiles.word_vector` bascule sur (0.5, 0.5, 0.0)
+        # — les poids demandés sont IGNORÉS. La calibration reconstruisait alors 11
+        # index pour rendre 11 fois le MÊME score (0.5115 au quatrième chiffre sur
+        # SciFact) et concluait « gardez le défaut » : conclusion juste, raison tue.
+        # Une opération vide qui ne se déclare pas est exactement ce que la maison
+        # interdit — refus net, jamais quinze minutes de calcul pour rien.
+        raise ValueError(
+            "calibrer sans --embeddings ne calibre RIEN : les poids (α, β, γ) ne "
+            "s'appliquent que si la table d'embeddings est fournie (sans elle, "
+            "l'encodage force 0.5/0.5/0.0 et toutes les configurations donnent le "
+            "même score). Fournir --embeddings <table.msee>, ou calibrer d'autres "
+            "paramètres (--smoothing-rank, --abtt) qui, eux, agissent sans table."
+        )
     grille = list(grille) if grille else list(GRILLE_STANDARD)
     if WEIGHTS_DEFAULT not in grille:
         grille.insert(0, WEIGHTS_DEFAULT)  # le défaut est TOUJOURS la référence
 
-    embeddings = (
-        Embeddings.load(Path(embeddings_path), abtt=abtt)
-        if embeddings_path is not None
-        else None
-    )
+    embeddings = Embeddings.load(Path(embeddings_path), abtt=abtt)
     dim_grid = grid[0] * grid[1] * grid[2]
     docs, profiles, colloc, lexicon = _preparer(
         Path(corpus_dir), None, smoothing_rank, grid, index_paths=index_paths
@@ -252,7 +263,9 @@ def calibrer(
             grid,
             lexicon,
             embeddings=embeddings,
-            embed_path=Path(embeddings_path) if embeddings_path else None,
+            embed_path=Path(
+                embeddings_path
+            ),  # non-None : garanti par le refus ci-dessus
             weights=weights,
             smoothing_rank=smoothing_rank,
         )

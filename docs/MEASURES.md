@@ -226,6 +226,79 @@ search costs +13 % sequentially and parallelizes per shard; the build peak is
 bounded by the largest shard. Replay:
 `python research/shards_fusion.py bench/alloprof/corpus bench/alloprof/verite.jsonl <workdir>`.
 
+## The English bench, and what it corrected (SciFact / BEIR)
+
+Every bench above is French. That made every number here unverifiable by an
+English reader — the exact reproach this repository makes to others. SciFact
+(BEIR: 5,183 abstracts, 300 claims, public ground truth) fixes that.
+Replay: `python bench/scifact.py`, then `bench/run_bench.py`.
+
+| On SciFact | R@10 | MRR |
+|---|---:|---:|
+| Mosaic, factory defaults (0.25/0.15/0.60) | 0.6574 | 0.5167 |
+| Mosaic, calibrated (0.60/0.30/0.10) | 0.70 | 0.5326 |
+| BM25 | **0.7645** | **0.6061** |
+
+**Our BM25 lands where the BEIR literature puts it** — which validates the
+measuring tools, not just the engine. Numbers here are comparable to anyone's.
+
+Three findings, two of which corrected a belief we held:
+
+1. **It was never the language — it is query NOISE.** Relative to BM25, Mosaic
+   reaches **67 %** on Alloprof (students' messy questions) and **86 %** on
+   SciFact (clean scientific claims). The prediction was the opposite. What
+   penalises this engine is the *tidiness of the query*, invisible with a single
+   bench, and it makes deterministic query pre-processing the highest-marge
+   lead we have (19 points between the two regimes).
+2. **The factory defaults are overfitted to a 40-document bench.** SciFact's
+   three best weightings are all heavily lexical (0.60/0.30/0.10 first), and
+   Alloprof already said the same (0.50/0.30/0.20). Two corpora, two languages,
+   2,616 queries, one direction. The default (0.25/0.15/0.60) was chosen on the
+   bundled cooking bench — forty documents. It is not changed here: the SciFact
+   gain (+1.59 MRR) sits under the tool's own +2 threshold, and changing a
+   default on thin evidence is the very mistake being diagnosed. It is a terrain
+   line: defaults suit paraphrase, general corpora want calibration.
+3. **A second bench exposes broken instruments.** `mosaic calibrer` without an
+   embeddings table was calibrating *nothing* — the weights only apply when the
+   gamma channel exists; without it the encoder forces 0.5/0.5/0.0 and ignores
+   them. Eleven configurations, one identical score, fifteen minutes of compute,
+   and a correct conclusion for an unstated reason. Four tests had been
+   validating that emptiness for months. Both fixed. Lesson kept: *a perfectly
+   flat result is not a verdict, it is a hint that the knob may not be connected.*
+
+## The challenger — a dense encoder against the engine, on the engine's bench
+
+The obvious question this repository never asked itself: how does Mosaic fare
+against what someone would build today with a modern embedder and nothing else?
+Same corpus (full Alloprof), same ground truth, no favours — dense only, no
+reranking, no fusion.
+
+| Alloprof, 2,316 queries | R@10 | MRR | indexing |
+|---|---:|---:|---:|
+| Mosaic, defaults | 0.3216 | 0.2164 | 47 ms/doc |
+| Mosaic, best configuration (four-channel fusion) | 0.5461 | 0.3572 | 47 ms/doc |
+| **LFM2.5-Embedding-350M, dense only** | **0.7082** | **0.5242** | **1,140 ms/doc** |
+
+**The challenger wins by 16.2 points of recall and 16.7 of MRR** over Mosaic's
+*best* configuration — and it runs locally too (219 MB, CPU, no GPU, no network),
+so "but that one needs the cloud" is not an argument here.
+
+What survives the defeat, measured rather than invoked: indexing is **24× faster**
+(2 minutes against 49 on this corpus), determinism is bit-for-bit, and this bench
+measures **prose and paraphrase** — not the terrains this engine was built for
+(references drowned in noise, identifiers, negation scope), which remain
+unmeasured against a dense baseline. That does not rescue the result; it bounds
+what it says.
+
+What it decides: the gamma channel runs on potion-128M, a **static** table (one
+vector per word, no context). Replacing it with a contextual encoder is now the
+engine's highest-leverage lead — measured, not assumed.
+
+Methodological note kept on the record: a first run on 300 documents returned
+0.9256 and was nearly reported as a win. Searching 300 documents is mechanically
+easier than searching 2,556. Same small-bench trap as the binary-rerank campaign,
+retensioned every single time.
+
 ## Buried tracks (ratified)
 
 - **Pyramid prefilter** (atlas step 3): failed its pre-declared criterion, and the
