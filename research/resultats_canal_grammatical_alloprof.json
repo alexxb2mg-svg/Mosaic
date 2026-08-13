@@ -1,0 +1,17 @@
+{
+  "corpus": ".\\bench\\alloprof\\corpus",
+  "grille": {
+    "rappel": 0.295,
+    "mrr": 0.1797,
+    "duree_s": 139.9
+  },
+  "grammatical": {
+    "rappel": 0.2893,
+    "mrr": 0.1631,
+    "duree_s": 217.5
+  },
+  "rattrapees": 7,
+  "perdues": 19,
+  "requetes_avec_matiere": 1349,
+  "requetes_total": 2316
+}

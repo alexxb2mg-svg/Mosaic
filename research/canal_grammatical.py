@@ -48,6 +48,14 @@ CRITÈRE DE DÉCISION, déclaré avant : le canal ne justifie une place en FUSIO
 les rattrapages atteignent 1 % des requêtes (≥ 24 sur Alloprof). En dessous, il reste
 hors fusion et la piste D3 (portage documenté, invitation à contribuer) est sa seule
 suite — quelle que soit l'élégance de la mécanique.
+
+VERDICT ALLOPROF (14/08, 01h20 — resultats_canal_grammatical_alloprof.json) :
+banc PERTINENT (1 349/2 316 requêtes portent la matière — P-G3 fausse, dans le bon
+sens) ; le canal seul fait quasi jeu égal avec la grille (0,2893 vs 0,2950 rappel —
+P-G1 fausse, il est bien plus fort que prédit) ; mais 7 rattrapées contre 19 PERDUES
+(P-G2 tenue de justesse, complémentarité NÉGATIVE au net). Critère 24 : ÉCHOUÉ.
+=> Le canal grammatical N'ENTRE PAS en fusion. Ce n'est pas un canal de RAPPEL :
+il voit le même monde que la grille, en légèrement plus flou. Sa suite est D3.
 """
 
 from __future__ import annotations
