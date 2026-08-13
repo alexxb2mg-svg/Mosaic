@@ -8,6 +8,7 @@ from mosaic import GRID_DEFAULT, ingest, queries
 from mosaic import rerank as rerank_module
 from mosaic import facettes as facettes_module
 from mosaic import profil as profil_module
+from mosaic import requete as requete_module
 from mosaic.bm25 import Bm25
 from mosaic import typage as typage_module
 from mosaic import atlas as atlas_module
@@ -1206,6 +1207,7 @@ class Index:
         recence: float = 0.0,
         fusion: bool = False,
         grammatical: bool = False,
+        nettoyer_requete: bool = False,
     ) -> list[dict]:
         """`fusion=True` : fusion RRF à trois canaux (grille + BM25 + embeddings), validée
         par la mesure — nécessite un index construit avec --hybride (cf. queries.search_fusion).
@@ -1224,6 +1226,12 @@ class Index:
                 "fusion et rerank sont exclusifs : la fusion intègre déjà le canal "
                 "embeddings comme canal plein"
             )
+        if nettoyer_requete:
+            # Retire le bruit conversationnel AVANT toute lecture de la requête —
+            # y compris avant la détection de références, qui doit voir le même
+            # texte que les canaux. Mesuré sur Alloprof : +6.50 pts de rappel et
+            # +4.82 de MRR, sans reconstruire l'index (cf. mosaic.requete).
+            text = requete_module.nettoyer(text)[0]
         if grammatical:
             if self.gram_mat is None:
                 raise ValueError(

@@ -299,6 +299,50 @@ Methodological note kept on the record: a first run on 300 documents returned
 easier than searching 2,556. Same small-bench trap as the binary-rerank campaign,
 retensioned every single time.
 
+## Deterministic query pre-processing — the best cost/benefit ratio in the project
+
+The English bench had shown that what penalises this engine is **query noise**, not
+language: relative to BM25, Mosaic reaches 67 % on Alloprof (students' messy
+questions) and 86 % on SciFact (clean claims). `mosaic.requete` attacks exactly
+that — it strips conversational noise before the search, using **closed classes**
+of French (greetings, requests for help, admissions of confusion, meta-discourse),
+by list, never by judgement. No model, no dependency, ~100 lines.
+
+Criterion declared before measuring: **+3 points of recall on Alloprof, no
+degradation on SciFact**. One index built, two passes over the queries — the only
+difference is the question asked.
+
+| | recall@10 | MRR |
+|---|---:|---:|
+| Alloprof, raw queries | 0.3216 | 0.2164 |
+| **Alloprof, cleaned queries** | **0.3866** | **0.2646** |
+| SciFact, raw | 0.6574 | 0.5135 |
+| SciFact, cleaned | 0.6574 | 0.5135 |
+
+**+6.50 points of recall and +4.82 of MRR where there is noise, and rigorously
+nothing where there is none** — identical to the fourth decimal on SciFact. That
+is the ideal behaviour of a pre-processor.
+
+Put next to everything else measured in this repository:
+
+| Lever | Gain | Cost |
+|---|---:|---|
+| Atlas channel (SOM) | +4.26 pts | minutes of build, GBs of RAM |
+| Weight calibration | +6.3 pts | full index rebuild |
+| **Query pre-processing** | **+6.50 pts** | **no rebuild at all** |
+
+It is the only one that applies to **existing indexes without touching them** —
+it transforms the question, not the index. Opt-in (`search --nettoyer-requete`)
+despite the gain: a result measured on one corpus does not become a universal
+default without evidence elsewhere, which is what the SciFact control provides.
+
+Two content-destroying bugs were caught by a **diagnostic run before the
+measurement**, not by the measurement itself: `hi` stripped from "Ly6C hi
+monocytes" (a domain term read as a greeting), and `(AZT).` truncated to `(AZT`.
+The second fix removed code rather than adding any — the engine's tokeniser
+already ignores punctuation, so cleaning it changed no result and only added
+risk. Keep only what moves a measurement.
+
 ## Buried tracks (ratified)
 
 - **Pyramid prefilter** (atlas step 3): failed its pre-declared criterion, and the
