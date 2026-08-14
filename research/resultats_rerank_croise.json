@@ -1,0 +1,16 @@
+{
+  "echantillon": 300,
+  "graine": 42,
+  "fenetre": 50,
+  "threads": 4,
+  "fusion": {
+    "rappel@10": 0.5094,
+    "mrr": 0.3203
+  },
+  "fusion_croise": {
+    "rappel@10": 0.6179,
+    "mrr": 0.5273
+  },
+  "latence_s": 133.93,
+  "verdict": "DIFFÉRÉ seulement (P-A3)"
+}
