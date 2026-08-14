@@ -12,39 +12,61 @@ Usage : python research/ram_build.py <corpus> <index_out>
 Le même fichier tourne sur l'ancien code (dict) et le nouveau (tableaux) — le
 champ `paires` lit l'une ou l'autre représentation — pour un A/B honnête :
     PYTHONPATH=<arbre>/src python research/ram_build.py <corpus> <out>
-Windows uniquement (GetProcessMemoryInfo/psapi) ; la mesure inclut tout le
-process (interpréteur, lexique, grilles), pas seulement le bloc épars — c'est
-voulu : le plafond vécu est celui du process entier.
+Trois plateformes, une seule grandeur : le PIC de mémoire résidente du process
+entier (interpréteur, lexique, grilles compris) — c'est voulu, le plafond vécu
+n'est pas celui du seul bloc épars. Windows lit PeakWorkingSetSize, Linux
+VmHWM (/proc/self/status), macOS ru_maxrss. Échec BRUYANT partout : un pic à 0
+publié serait un mensonge.
 """
 
-import ctypes
-import ctypes.wintypes as wintypes
 import json
 import sys
 import time
 from pathlib import Path
+
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes as wintypes
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from mosaic.index import Index
 
 
-class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
-    _fields_ = [
-        ("cb", wintypes.DWORD),
-        ("PageFaultCount", wintypes.DWORD),
-        ("PeakWorkingSetSize", ctypes.c_size_t),
-        ("WorkingSetSize", ctypes.c_size_t),
-        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-        ("PagefileUsage", ctypes.c_size_t),
-        ("PeakPagefileUsage", ctypes.c_size_t),
-    ]
-
+if sys.platform == "win32":
+    # Structure de l'API Windows : sa seule DÉFINITION exige ctypes.wintypes,
+    # absent ailleurs — d'où la garde, sinon le module ne s'importe même pas
+    # sur Linux (le banc doit rester lisible et lançable partout).
+    class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
 
 def pic_working_set_mo() -> int:
+    """Pic de mémoire résidente du process, en Mo, sur la plateforme courante."""
+    if sys.platform == "linux":
+        # VmHWM = « high water mark » : l'équivalent exact du PeakWorkingSetSize.
+        for ligne in Path("/proc/self/status").read_text().splitlines():
+            if ligne.startswith("VmHWM:"):
+                return int(ligne.split()[1]) // 1024
+        raise OSError("VmHWM absent de /proc/self/status")
+    if sys.platform == "darwin":
+        import resource
+
+        # macOS rend ru_maxrss en OCTETS (Linux en kio) — la confusion est un
+        # classique, et donnerait un pic 1024 fois trop grand.
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // (1024 * 1024)
+    if sys.platform != "win32":
+        raise OSError(f"plateforme non gérée pour la mesure de pic : {sys.platform}")
     pmc = _PROCESS_MEMORY_COUNTERS()
     pmc.cb = ctypes.sizeof(pmc)
     # Windows moderne : la fonction vit dans kernel32 (K32...) ; psapi.dll n'est

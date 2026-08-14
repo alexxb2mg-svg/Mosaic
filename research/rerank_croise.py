@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import subprocess
 import sys
@@ -47,11 +48,18 @@ sys.path.insert(0, str(RACINE / "src"))
 
 from mosaic.index import Index  # noqa: E402
 
-CORPUS = Path("./bench/alloprof/corpus")
-VERITE = Path("./bench/alloprof/verite.jsonl")
-POTION = RACINE / "data_externes" / "potion_fr_abtt2.msee"
-SERVEUR = Path("/opt/mosaic/outils/llamacpp_b10375/llama-server.exe")
-RERANKER = Path("/opt/mosaic/modeles_gguf/bge-reranker-v2-m3-Q8_0.gguf")
+# Chemins relatifs au dépôt, surchargeables par l'environnement : ce banc doit
+# être rejouable ailleurs que sur la machine où il a été écrit.
+CORPUS = Path(os.environ.get("MOSAIC_BENCH_CORPUS", RACINE / "bench/alloprof/corpus"))
+VERITE = Path(
+    os.environ.get("MOSAIC_BENCH_VERITE", RACINE / "bench/alloprof/verite.jsonl")
+)
+POTION = Path(
+    os.environ.get("MOSAIC_POTION", RACINE / "data_externes/potion_fr_abtt2.msee")
+)
+# llama-server (llama.cpp) et le reranker GGUF : hors dépôt, chemins à donner.
+SERVEUR = Path(os.environ.get("LLAMA_SERVER", "llama-server"))
+RERANKER = Path(os.environ.get("RERANKER_GGUF", "bge-reranker-v2-m3-Q8_0.gguf"))
 PORT = 8089
 GRAINE = 42
 

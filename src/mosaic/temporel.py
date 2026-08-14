@@ -28,7 +28,7 @@ SEUIL_VERSION_DEFAUT = 0.55
 SANS_DATE = "0000-00-00"
 _DATE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 # Format compact AAAAMMJJ (convention massive des corpus compta/chantiers :
-# `20260622_Fournisseur_BL_9990001.pdf`, `..._20260630.md`) — 973/1271 docs compta étaient
+# `20260622_BL_9990001.pdf`, `..._20260630.md`) — 973/1271 documents comptables étaient
 # sans date faute de le lire. Gardes contre les références numériques : fenêtre de
 # 8 chiffres ISOLÉE (pas de chiffre adjacent), année 19xx/20xx, mois et jour valides.
 _DATE_COMPACTE = re.compile(

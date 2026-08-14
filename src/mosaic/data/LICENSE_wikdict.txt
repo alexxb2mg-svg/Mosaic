@@ -17,8 +17,10 @@ base WikDict eng-fra ci-dessus : voir scripts/import_wikdict.py pour la
 méthode exacte (filtres appliqués, seuil de confiance, code source complet).
 En tant que dérivation d'une œuvre CC BY-SA, ce fichier de données est
 distribué sous les mêmes termes CC BY-SA — il est SÉPARÉ du code du projet
-Mosaic (licence MIT, voir la racine du dépôt) et ne doit jamais être
-confondu avec lui. Toute réutilisation de lexicon_wikdict_fr_en.json en
+Mosaic, dont la licence est celle du fichier LICENSE à la racine du dépôt,
+et ne doit jamais être confondu avec lui. Le code et ces données sont
+simplement AGRÉGÉS dans le même paquet : la réciprocité de CC BY-SA porte
+sur les dérivations de CES DONNÉES, pas sur le code qui les lit. Toute réutilisation de lexicon_wikdict_fr_en.json en
 dehors de ce projet doit conserver cette attribution et rester sous
 CC BY-SA.
 
