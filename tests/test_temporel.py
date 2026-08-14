@@ -16,10 +16,10 @@ def test_date_du_chemin():
 def test_date_du_chemin_format_compact():
     # Convention massive des corpus compta/chantiers : AAAAMMJJ collé en préfixe ou
     # suffixe du nom (973/1271 docs compta étaient sans date à cause de ce format).
-    assert date_du_chemin("20260622_Fournisseur_BL_9990001.pdf") == "2026-06-22"
+    assert date_du_chemin("20260622_fournisseur_BL_9990001.pdf") == "2026-06-22"
     assert (
         date_du_chemin(
-            "Bons de Livraison/FOURNISSEUR/2026/06-Juin/20260622_Fournisseur_BL_9990001.pdf"
+            "Bons de Livraison/FOURNISSEUR/2026/06-Juin/20260622_fournisseur_BL_9990001.pdf"
         )
         == "2026-06-22"
     )
@@ -36,13 +36,11 @@ def test_date_du_chemin_dossier_classement():
         date_du_chemin("Factures clients/2024/06-Juin/F24069901 client.pdf")
         == "2024-06-00"
     )
-    assert (
-        date_du_chemin("2026_05-Mai_CCI_AFFAIRE_A_MEMOIRE_CHANTIER.md") == "2026-05-00"
-    )
+    assert date_du_chemin("2026_05-Mai_AFFAIRE_MEMOIRE_CHANTIER.md") == "2026-05-00"
     # une date complète (compacte ou à tirets) garde la priorité sur le dossier
     assert (
         date_du_chemin(
-            "Bons de Livraison/FOURNISSEUR/2026/06-Juin/20260622_Fournisseur_BL_9990001.pdf"
+            "Bons de Livraison/FOURNISSEUR/2026/06-Juin/20260622_fournisseur_BL_9990001.pdf"
         )
         == "2026-06-22"
     )

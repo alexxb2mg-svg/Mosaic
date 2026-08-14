@@ -87,6 +87,11 @@ def test_tools_list_returns_tool_schemas():
         "mosaic_chemin",
         "mosaic_stats",
         "mosaic_diff",
+        # magasin structurel (14/08) : compter / ordonner / joindre par réf —
+        # ce que la recherche par similarité ne sait structurellement pas faire
+        "mosaic_compter",
+        "mosaic_recents",
+        "mosaic_refs",
     }
     for t in tools:
         assert "inputSchema" in t
@@ -518,6 +523,11 @@ def test_stdio_smoke_initialize_and_tools_list(tmp_path):
         "mosaic_chemin",
         "mosaic_stats",
         "mosaic_diff",
+        # magasin structurel (14/08) : compter / ordonner / joindre par réf —
+        # ce que la recherche par similarité ne sait structurellement pas faire
+        "mosaic_compter",
+        "mosaic_recents",
+        "mosaic_refs",
     }
 
 

@@ -484,6 +484,45 @@ def _construire_parser() -> argparse.ArgumentParser:
     p_stats = ajouter("stats", "statistiques et configuration d'un index")
     p_stats.add_argument("index", help="dossier de l'index")
 
+    p_compter = ajouter(
+        "compter",
+        "combien de documents ? (comptage exact, pas une recherche) — rend aussi "
+        "la couverture : le nombre de documents SANS date, exclus des comptes datés",
+    )
+    p_compter.add_argument("index", help="dossier de l'index")
+    p_compter.add_argument(
+        "--chemin", default="", help="fragment de chemin (cherché littéralement)"
+    )
+    p_compter.add_argument(
+        "--type", dest="type_doc", default="", help="type de document"
+    )
+    p_compter.add_argument(
+        "--date", default="", help="préfixe de date : 2026, 2026-06, 2026-06-22"
+    )
+    p_compter.add_argument(
+        "--par-mois", action="store_true", help="détailler la répartition par mois"
+    )
+
+    p_recents = ajouter(
+        "recents",
+        "les k documents les plus RÉCENTS (ordre exact par date, pas par pertinence) ; "
+        "les documents sans date sont exclus, jamais classés au hasard",
+    )
+    p_recents.add_argument("index", help="dossier de l'index")
+    p_recents.add_argument("-k", type=int, default=5, help="combien en rendre")
+    p_recents.add_argument("--chemin", default="", help="fragment de chemin")
+    p_recents.add_argument(
+        "--type", dest="type_doc", default="", help="type de document"
+    )
+
+    p_refs = ajouter(
+        "refs",
+        "quels documents portent cette référence ? (jointure exacte à travers "
+        "PLUSIEURS index : une réf relie un devis, un BL et une facture)",
+    )
+    p_refs.add_argument("ref", help="référence exacte (n° de BL, code article…)")
+    p_refs.add_argument("index", nargs="+", help="un ou plusieurs dossiers d'index")
+
     p_explain = ajouter(
         "explain", "pourquoi ce document ? (contributions par token, démélange)"
     )
@@ -981,6 +1020,66 @@ def _cmd_stats(args) -> int:
     return 0
 
 
+def _magasin(chemins: list[str]):
+    """Dérive un magasin structurel des index donnés. Le nom d'un index est celui
+    de son dossier — c'est ce que l'appelant reconnaîtra dans la réponse."""
+    from mosaic.structurel import Magasin
+
+    m = Magasin()
+    noms = []
+    for c in chemins:
+        nom = Path(c).name
+        m.charger(nom, Path(c))
+        noms.append(nom)
+    return m, noms
+
+
+def _cmd_compter(args) -> int:
+    m, (nom,) = _magasin([args.index])
+    sortie = {
+        "total": m.compter(
+            nom,
+            chemin_contient=args.chemin,
+            type_doc=args.type_doc,
+            date_prefixe=args.date,
+        ),
+        # La couverture accompagne TOUJOURS le compte : un total daté qui tait le
+        # nombre de documents sans date laisse croire qu'il couvre tout.
+        "sans_date": m.sans_date(nom),
+    }
+    if args.par_mois:
+        sortie["par_mois"] = m.repartition_par_mois(
+            nom, chemin_contient=args.chemin, type_doc=args.type_doc
+        )
+    _out(sortie)
+    return 0
+
+
+def _cmd_recents(args) -> int:
+    _parse_int_positive(args.k, "k")
+    m, (nom,) = _magasin([args.index])
+    _out(
+        [
+            {"id": doc, "date": date}
+            for doc, date in m.plus_recents(
+                nom, k=args.k, chemin_contient=args.chemin, type_doc=args.type_doc
+            )
+        ]
+    )
+    return 0
+
+
+def _cmd_refs(args) -> int:
+    m, _ = _magasin(args.index)
+    _out(
+        [
+            {"index": idx, "id": doc, "date": date}
+            for idx, doc, date in m.documents_portant_ref(args.ref)
+        ]
+    )
+    return 0
+
+
 def _cmd_explain(args) -> int:
     _parse_int_positive(args.top, "top")
     idx = _ouvrir_index(Path(args.index), verify_embeddings=False)
@@ -1257,6 +1356,9 @@ _COMMANDES = {
     "related": _cmd_related,
     "render": _cmd_render,
     "stats": _cmd_stats,
+    "compter": _cmd_compter,
+    "recents": _cmd_recents,
+    "refs": _cmd_refs,
     "explain": _cmd_explain,
     "carte": _cmd_carte,
     "proches": _cmd_proches,

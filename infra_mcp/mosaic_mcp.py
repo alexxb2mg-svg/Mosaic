@@ -311,6 +311,85 @@ TOOLS = [
         },
     },
     {
+        "name": "mosaic_compter",
+        "description": (
+            "COMPTE EXACT de documents — pas une recherche. À utiliser dès que la question "
+            "est « combien » (« combien de BL Fournisseur en juin ? », « combien de photos sur ce "
+            "chantier ? ») : une recherche sémantique rend des documents classés par "
+            "ressemblance, elle ne sait pas COMPTER. Filtres cumulatifs et tous optionnels : "
+            "chemin (fragment, cherché littéralement), type, date (préfixe 2026 / 2026-06 / "
+            "2026-06-22). Rend aussi `sans_date` : le nombre de documents SANS date connue, "
+            "donc exclus des comptes datés — le lire avant de conclure « il n'y en a que N »."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domaine": {"type": "string", "description": "nom du domaine."},
+                "chemin": {
+                    "type": "string",
+                    "description": "fragment de chemin (ex. 'Bons de Livraison/FOURNISSEUR').",
+                },
+                "type": {"type": "string", "description": "type de document."},
+                "date": {
+                    "type": "string",
+                    "description": "préfixe de date : 2026, 2026-06, 2026-06-22.",
+                },
+                "par_mois": {
+                    "type": "boolean",
+                    "description": "ajouter la répartition par mois.",
+                },
+            },
+            "required": ["domaine"],
+        },
+    },
+    {
+        "name": "mosaic_recents",
+        "description": (
+            "Les k documents les plus RÉCENTS, par ordre de date exact (pas de pertinence). "
+            "Pour « le dernier bon de livraison », « les 3 dernières notes de ce chantier ». "
+            "Les documents dont la date est inconnue sont EXCLUS — jamais classés au hasard. "
+            "Différent de mosaic_search avec recence : ici l'ordre est la date, point."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domaine": {"type": "string", "description": "nom du domaine."},
+                "k": {
+                    "type": "integer",
+                    "description": "combien en rendre (défaut 5).",
+                },
+                "chemin": {"type": "string", "description": "fragment de chemin."},
+                "type": {"type": "string", "description": "type de document."},
+            },
+            "required": ["domaine"],
+        },
+    },
+    {
+        "name": "mosaic_refs",
+        "description": (
+            "Quels documents portent CETTE référence exacte, à travers PLUSIEURS domaines ? "
+            "C'est la jointure que la recherche ne sait pas faire : une même réf (n° de BL, "
+            "code article, n° de devis) relie un devis, un bon de livraison et une facture "
+            "sans qu'aucun mot ne se ressemble. Rend (domaine, document, date), du plus "
+            "récent au plus ancien. Pour la traçabilité chantier -> pièce fournisseur."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ref": {
+                    "type": "string",
+                    "description": "référence EXACTE (ex. '9990001', '9990004').",
+                },
+                "domaines": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "domaines à joindre ; défaut : tous les disponibles.",
+                },
+            },
+            "required": ["ref"],
+        },
+    },
+    {
         "name": "mosaic_diff",
         "description": (
             "Diff SÉMANTIQUE entre deux index d'un même corpus à deux moments : ce qui a "
@@ -528,8 +607,83 @@ def _call_mosaic_stats(state: dict, args: dict) -> object:
     return _get_index(state, args["domaine"]).stats()
 
 
+def _magasin_pour(state: dict, domaines: list[str]):
+    """Magasin structurel dérivé des facettes des domaines demandés.
+
+    Reconstruit à chaque appel : 0,2 s pour 4 000 documents, et zéro risque de
+    servir un compte périmé après un rebuild — un compte faux serait pire que
+    l'attente qu'il économise."""
+    from mosaic.structurel import Magasin
+
+    m = Magasin()
+    charges = []
+    for d in domaines:
+        index_dir = Path(state["data_dir"]) / f"index_{d}"
+        if (index_dir / "facettes.json").exists():
+            m.charger(d, index_dir)
+            charges.append(d)
+    return m, charges
+
+
+def _call_mosaic_compter(state: dict, args: dict) -> object:
+    _require(args, "domaine")
+    d = args["domaine"]
+    m, charges = _magasin_pour(state, [d])
+    if not charges:
+        raise ValueError(
+            f"domaine {d!r} sans facettes.json — reconstruire l'index pour compter"
+        )
+    sortie = {
+        "total": m.compter(
+            d,
+            chemin_contient=args.get("chemin", ""),
+            type_doc=args.get("type", ""),
+            date_prefixe=args.get("date", ""),
+        ),
+        "sans_date": m.sans_date(d),
+    }
+    if args.get("par_mois"):
+        sortie["par_mois"] = m.repartition_par_mois(
+            d, chemin_contient=args.get("chemin", ""), type_doc=args.get("type", "")
+        )
+    return sortie
+
+
+def _call_mosaic_recents(state: dict, args: dict) -> object:
+    _require(args, "domaine")
+    d = args["domaine"]
+    m, charges = _magasin_pour(state, [d])
+    if not charges:
+        raise ValueError(f"domaine {d!r} sans facettes.json — reconstruire l'index")
+    return [
+        {"id": doc, "date": date}
+        for doc, date in m.plus_recents(
+            d,
+            k=int(args.get("k", 5)),
+            chemin_contient=args.get("chemin", ""),
+            type_doc=args.get("type", ""),
+        )
+    ]
+
+
+def _call_mosaic_refs(state: dict, args: dict) -> object:
+    _require(args, "ref")
+    domaines = args.get("domaines") or domaines_disponibles(Path(state["data_dir"]))
+    m, charges = _magasin_pour(state, domaines)
+    return {
+        "domaines_interroges": charges,
+        "documents": [
+            {"domaine": idx, "id": doc, "date": date}
+            for idx, doc, date in m.documents_portant_ref(args["ref"])
+        ],
+    }
+
+
 _TOOL_HANDLERS = {
     "mosaic_search": _call_mosaic_search,
+    "mosaic_compter": _call_mosaic_compter,
+    "mosaic_recents": _call_mosaic_recents,
+    "mosaic_refs": _call_mosaic_refs,
     "mosaic_explain": _call_mosaic_explain,
     "mosaic_like": _call_mosaic_like,
     "mosaic_croyance_assert": _call_croyance_assert,
