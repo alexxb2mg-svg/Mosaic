@@ -11,7 +11,7 @@ _EXTS = {".md", ".txt"}
 # v1.5 : tokens de chemin. Séparateurs `/ _ - .` remplacés par des espaces puis
 # tokenisation standard (extension incluse) — l'IDF neutralise ce qui est
 # partout (ex. "md"/"pdf" sur tout un corpus), mais rend cherchable ce qui ne
-# vivait que dans le nom/chemin du document (noms de clients, de fournisseurs, de projets...).
+# vivait que dans le nom/chemin du document (noms de client, de fournisseur...).
 _PATH_TOKEN_SEP_RE = re.compile(r"[/_\-.]")
 
 

@@ -51,6 +51,7 @@ if sys.platform == "win32":
             ("PeakPagefileUsage", ctypes.c_size_t),
         ]
 
+
 def pic_working_set_mo() -> int:
     """Pic de mémoire résidente du process, en Mo, sur la plateforme courante."""
     if sys.platform == "linux":

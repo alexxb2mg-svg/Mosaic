@@ -163,7 +163,8 @@ def _convertir_anydoc(path: Path) -> str | None:
 
 
 # Crochet OCR (v1.5) : documents muets (convertible dont la conversion markitdown
-# rend < 200 caractères). Provider PAR DÉFAUT = rapidocr (paquet unifié RapidAI) avec repli sur l'ancien rapidocr_onnxruntime ; les PDF
+# rend < 200 caractères). Provider PAR DÉFAUT = rapidocr (paquet unifié RapidAI,
+# validé par l'auteur le 09/08) avec repli sur l'ancien rapidocr_onnxruntime ; les PDF
 # sont rastérisés par pypdfium2. Tout est sous garde — sans les paquets, la
 # détection dégrade proprement (available_ocr() False), jamais lever à l'import.
 # Import PARESSEUX (v2.0) : rapidocr tire onnxruntime, qui au chargement sous Linux émet

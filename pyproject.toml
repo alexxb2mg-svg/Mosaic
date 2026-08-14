@@ -7,7 +7,7 @@ name = "mosaic-index"
 version = "0.1.0"
 description = "Indexation sémantique par mosaïques hyperdimensionnelles — locale, déterministe, sans LLM"
 requires-python = ">=3.12"
-license = {text = "Apache-2.0"}
+license = {text = "MIT"}
 # Runtime : plancher + plafond majeur — un paquet publié épinglé au patch devient
 # ininstallable avec le temps ; la reproductibilité exacte reste garantie côté dev/CI
 # (extras épinglés ci-dessous), pas imposée aux environnements des utilisateurs.

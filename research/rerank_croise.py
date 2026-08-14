@@ -48,8 +48,6 @@ sys.path.insert(0, str(RACINE / "src"))
 
 from mosaic.index import Index  # noqa: E402
 
-# Chemins relatifs au dépôt, surchargeables par l'environnement : ce banc doit
-# être rejouable ailleurs que sur la machine où il a été écrit.
 CORPUS = Path(os.environ.get("MOSAIC_BENCH_CORPUS", RACINE / "bench/alloprof/corpus"))
 VERITE = Path(
     os.environ.get("MOSAIC_BENCH_VERITE", RACINE / "bench/alloprof/verite.jsonl")
@@ -57,7 +55,7 @@ VERITE = Path(
 POTION = Path(
     os.environ.get("MOSAIC_POTION", RACINE / "data_externes/potion_fr_abtt2.msee")
 )
-# llama-server (llama.cpp) et le reranker GGUF : hors dépôt, chemins à donner.
+# llama-server (llama.cpp) et le reranker GGUF vivent hors du dépôt : à donner.
 SERVEUR = Path(os.environ.get("LLAMA_SERVER", "llama-server"))
 RERANKER = Path(os.environ.get("RERANKER_GGUF", "bge-reranker-v2-m3-Q8_0.gguf"))
 PORT = 8089

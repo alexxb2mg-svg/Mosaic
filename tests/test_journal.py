@@ -121,3 +121,58 @@ def test_une_ligne_tronquee_ne_perd_pas_le_reste(tmp_path):
 def test_variable_vide_vaut_absente(monkeypatch):
     monkeypatch.setenv(journal.VARIABLE, "   ")
     assert journal.actif() is None
+
+
+# --- rotation : le journal actif ne grossit pas indéfiniment ---------------------
+
+
+def test_pas_de_rotation_sous_le_seuil(tmp_path, monkeypatch):
+    """Le cas courant ne paie rien : sous le seuil, aucun fichier n'est créé."""
+    j = tmp_path / "j.jsonl"
+    monkeypatch.setenv("MOSAIC_JOURNAL", str(j))
+    monkeypatch.setenv("MOSAIC_JOURNAL_MAX_MO", "1")
+    journal.consigner("idx", "question", 5, {}, [{"id": "a", "score": 1.0}])
+    assert j.exists()
+    assert list(tmp_path.glob("*.gz")) == []
+
+
+def test_rotation_au_dela_du_seuil(tmp_path, monkeypatch):
+    """Au-delà du seuil, le journal est ARCHIVÉ COMPRESSÉ et reprend à vide —
+    les lignes ne sont jamais perdues, seulement déplacées."""
+    j = tmp_path / "j.jsonl"
+    j.write_text('{"t": "vieux", "q": "ancienne question"}\n' * 400, encoding="utf-8")
+    monkeypatch.setenv("MOSAIC_JOURNAL", str(j))
+    monkeypatch.setenv("MOSAIC_JOURNAL_MAX_MO", "0.001")  # 1 ko : rotation forcée
+
+    journal.consigner("idx", "neuve", 5, {}, [{"id": "a", "score": 1.0}])
+
+    archives = list(tmp_path.glob("j-*.jsonl.gz"))
+    assert len(archives) == 1, "l'ancien journal doit être archivé, pas supprimé"
+    lignes = journal.lire(j)
+    assert len(lignes) == 1 and lignes[0]["q"] == "neuve", "le neuf reprend à vide"
+
+    import gzip
+
+    contenu = gzip.decompress(archives[0].read_bytes()).decode("utf-8")
+    assert contenu.count("ancienne question") == 400, "aucune ligne perdue"
+
+
+def test_une_rotation_impossible_ne_casse_pas_la_recherche(tmp_path, monkeypatch):
+    """Même garde que l'écriture : le journal est un témoin, jamais un obstacle."""
+    j = tmp_path / "j.jsonl"
+    j.write_text("x" * 5000, encoding="utf-8")
+    monkeypatch.setenv("MOSAIC_JOURNAL", str(j))
+    monkeypatch.setenv("MOSAIC_JOURNAL_MAX_MO", "0.001")
+    monkeypatch.setattr(
+        journal.gzip, "open", lambda *a, **k: (_ for _ in ()).throw(OSError("disque"))
+    )
+    journal.consigner("idx", "q", 5, {}, [{"id": "a", "score": 1.0}])  # ne lève pas
+
+
+def test_seuil_invalide_desactive_la_rotation_sans_bruit(tmp_path, monkeypatch):
+    j = tmp_path / "j.jsonl"
+    j.write_text("x" * 5000, encoding="utf-8")
+    monkeypatch.setenv("MOSAIC_JOURNAL", str(j))
+    monkeypatch.setenv("MOSAIC_JOURNAL_MAX_MO", "pas un nombre")
+    journal.consigner("idx", "q", 5, {}, [{"id": "a", "score": 1.0}])
+    assert list(tmp_path.glob("*.gz")) == []

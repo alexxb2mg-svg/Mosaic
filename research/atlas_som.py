@@ -26,7 +26,7 @@ PROTOCOLE :
 HONNÊTETÉ : ce prototype teste le MÉCANISME atlas seul (cartes de chaleur), pas une
 greffe dans l'encodeur complet — si l'atlas seul ne bat pas le moteur complet sur les
 pièges, la greffe se discute quand même (canal additif possible) : les résultats
-instruisent le dossier, le verdict d'enterrement ou de poursuite se prend avec l'auteur.
+instruisent le dossier, le verdict d'enterrement ou de poursuite se prend avec le mainteneur.
 Prior déclaré dans le briefing : faible à moyen (Kanerva a choisi l'aléatoire pour
 préserver la capacité de superposition — dégradation mesurée à l'étape 2).
 """
@@ -327,9 +327,7 @@ def main() -> int:
         print(
             f"CRITÈRE DU BRIEFING ATTEINT pour σ ∈ {gagnants} — à confirmer à l'étape 2"
         )
-        print(
-            "(capacité de superposition) et à discuter avec l'auteur avant toute greffe."
-        )
+        print("(capacité de superposition) et à discuter avec l'auteur avant toute greffe.")
     else:
         print(
             "Critère du briefing NON atteint sur ce banc — résultats posés pour DISCUSSION"

@@ -1,4 +1,4 @@
-"""Typage des tokens — le routeur des grilles typées (spec v4, 12/08).
+"""Typage des tokens — le routeur des grilles typées (spec v4, idée l'auteur 12/08).
 
 Chaque token d'un document est routé vers UNE grille selon son type. Le routage est
 déterministe et se fait à l'ÉCRITURE (l'encodage est un aller simple : une fois

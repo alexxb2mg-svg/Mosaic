@@ -1,6 +1,6 @@
 """Multi-sauts VECTEUR-NATIF — parcours de graphe dans l'espace des valeurs, sans nom.
 
-Question d'origine : « on n'a pas besoin des mots, juste des valeurs » — peut-on suivre A→B→C
+Question de l'auteur : « on n'a pas besoin des mots, juste des valeurs » — peut-on suivre A→B→C
 entièrement dans la grille ? La sonde permutation-par-nom exigeait de connaître le NOM de
 l'étape intermédiaire (le décalage en dépend). Réponse mesurée ici en trois designs :
 

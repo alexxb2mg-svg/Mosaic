@@ -17,6 +17,7 @@ from mosaic import grammaire as grammaire_module
 from mosaic.typage import GrilleTypee
 from mosaic.collocations import detect, merge
 from mosaic.docio import _EXTS, _path_tokens, _read_text, _read_text_convertible
+from mosaic import ngrammes as ngrammes_module
 from mosaic.embeddings import Embeddings
 from mosaic.encoder import WEIGHTS_DEFAULT, encode, quantize
 from mosaic.lexicon import canonicalize, compile_lexicon, load_lexicon
@@ -105,6 +106,7 @@ class Index:
         rerank_vecs: np.ndarray | None = None,
         rerank_model: str | None = None,
         index_paths: bool = True,
+        ngrammes: int = 0,
         ocr: bool = False,
         relations_mat: np.ndarray | None = None,
         relations_norms: np.ndarray | None = None,
@@ -141,6 +143,7 @@ class Index:
         self.rerank_vecs = rerank_vecs
         self.rerank_model = rerank_model
         self.index_paths = index_paths
+        self.ngrammes = ngrammes
         self.ocr = ocr
         # Convertisseur d'ingestion (opt-in MOSAIC_CONVERTISSEUR). À la CONSTRUCTION
         # il vient de l'environnement ; à la RÉOUVERTURE il vient du meta — un index
@@ -306,6 +309,7 @@ class Index:
         type_doc: bool,
         rerank_vectors: bool,
         grammatical: bool,
+        rerank_chemin_si_muet: bool = False,
     ) -> tuple[
         list[tuple[str, list[str]]],
         list[list[str]],
@@ -366,7 +370,19 @@ class Index:
                 tokens = tokenize(facettes[doc_id]["type"]) + tokens
             raw.append((doc_id, tokens))
             if rerank_vectors:
-                rerank_texts.append(text)
+                # Un document LU MAIS MUET (photo sans texte détectable, PDF
+                # graphique) donnait un vecteur NUL au canal embeddings : rang de
+                # queue garanti, donc il ne pouvait gagner que sur 3 canaux au lieu
+                # de 4 (mesuré 14/08 : 310 photos sur 2 652 dans `chantiers`, rang
+                # embed ~2032). La grille, elle, voit le chemin depuis toujours —
+                # c'est cette incohérence entre canaux qu'on ferme ici : à défaut de
+                # contenu, le canal reçoit le chemin, qui porte le sens (chantier,
+                # phase, nature). Opt-in tant que la mesure n'a pas tranché.
+                rerank_texts.append(
+                    text
+                    if text.strip() or not rerank_chemin_si_muet
+                    else " ".join(_path_tokens(doc_id))
+                )
             if grammatical:
                 gram_rows.append(
                     grammaire_module.canal_document(text, dim_grille, ext_gram)
@@ -556,6 +572,8 @@ class Index:
         grilles_typees: bool = False,
         atlas: bool = False,
         grammatical: bool = False,
+        rerank_chemin_si_muet: bool = False,
+        ngrammes: int = 0,
     ) -> "Index":
         """Construit un index — orchestrateur PLAT, une ligne par phase :
 
@@ -595,12 +613,20 @@ class Index:
                 type_doc,
                 rerank_vectors,
                 grammatical,
+                rerank_chemin_si_muet,
             )
         )
         if lexicon is None:
             lexicon = load_lexicon()
         compiled = compile_lexicon(lexicon)
         canon = [(doc_id, canonicalize(tokens, compiled)) for doc_id, tokens in raw]
+        if ngrammes:
+            # Les fragments s'ajoutent APRÈS canonicalisation : ils décrivent le
+            # mot tel qu'il sera cherché, pas sa forme de surface.
+            canon = [
+                (doc_id, ngrammes_module.enrichir(toks, ngrammes))
+                for doc_id, toks in canon
+            ]
         colloc = detect([t for _, t in canon])
         docs = [
             (doc_id, merge(merge(tokens, colloc), colloc)) for doc_id, tokens in canon
@@ -666,6 +692,7 @@ class Index:
             rerank_vecs=rerank_vecs,
             rerank_model=rerank_model,
             index_paths=index_paths,
+            ngrammes=ngrammes,
             ocr=ocr,
             facettes=facettes,
             profil=profil,
@@ -754,6 +781,10 @@ class Index:
         # construit avant leur existence -> comportement v1.4 exact à la réouverture, et
         # surtout à un add() ultérieur (jamais d'injection/OCR qu'un build n'avait pas).
         index_paths = bool(meta.get("index_paths", False))
+        # Absent des index antérieurs au 14/08 = 0 : ils rouvrent sans n-grammes,
+        # exactement comme ils ont été construits (jamais une requête enrichie
+        # contre des documents qui ne le sont pas).
+        ngrammes = int(meta.get("ngrammes", 0))
         ocr = bool(meta.get("ocr", False))
         # Convertisseur d'ORIGINE (absent des métas antérieurs = markitdown, le défaut
         # historique) : c'est lui qui a produit le texte de cet index, pas l'environnement.
@@ -847,6 +878,7 @@ class Index:
             rerank_vecs=rerank_vecs,
             rerank_model=rerank_model,
             index_paths=index_paths,
+            ngrammes=ngrammes,
             ocr=ocr,
             convertisseur=convertisseur,
             relations_mat=relations_mat,
@@ -876,6 +908,11 @@ class Index:
             "index_paths": self.index_paths,
             "ocr": self.ocr,
         }
+        if self.ngrammes:
+            # Écrit SEULEMENT s'il est actif : une clé de plus dans le méta change
+            # l'empreinte du fichier, et un index construit sans cette option doit
+            # rester bit à bit identique à ce qu'il était (garanti par un test).
+            extra_meta["ngrammes"] = self.ngrammes
         if self.convertisseur != "markitdown":
             # Le convertisseur change le TEXTE lu, donc les grilles : deux index lus
             # par des convertisseurs différents ne sont pas comparables. Tracé dès
@@ -1366,8 +1403,8 @@ class Index:
         codes, dates), au prix des codes-métier hors dictionnaire. Sans effet si l'index n'a pas
         d'embeddings."""
         # Rejoue le MÊME pipeline que le build (canonicalize + fusion de collocations) sur les
-        # tokens de chemin, pour retrouver leur forme réelle dans le vocabulaire (« acme corp »
-        # -> « acme_corp »), et les exclure du voisinage.
+        # tokens de chemin, pour retrouver leur forme réelle dans le vocabulaire (« pdf local »
+        # -> « pdf_local »), et les exclure du voisinage.
         path_tokens: set[str] = set()
         for doc_id in self.ids:
             merged = merge(

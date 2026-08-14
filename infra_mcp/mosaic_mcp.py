@@ -16,7 +16,7 @@ un test de fumée en subprocess.
 raison d'être du serveur plutôt que la CLI : `mosaic search` réouvre l'index à chaque process
 (~1-2 s), le serveur ne l'ouvre qu'une fois puis répond en ~50 ms. `state["cache_mtime"]`
 retient la mtime de `vocab.msev` au moment de l'ouverture : un rebuild planifié
-(`une tâche planifiée`) la fait changer, et l'appel suivant réouvre l'index plutôt que de
+(`LOCAL_Mosaic_Rebuild`) la fait changer, et l'appel suivant réouvre l'index plutôt que de
 servir indéfiniment le contenu chargé au premier `open()` du process (revue finale v1.6,
 Critical — cf. `_get_index`).
 """
@@ -39,12 +39,13 @@ SERVER_VERSION = "1.6.0"
 # aucune négociation dynamique ici (serveur minimal, un seul comportement).
 PROTOCOL_VERSION = "2024-11-05"
 
-# domaine -> la racine des index/index_<domaine>
+# domaine -> /opt/mosaic/mosaic/index_<domaine> (chemins de production, cf. mémo agents LOCAL
+# reference_mosaic_usage_agents.md et scripts/reconstruire_index.py §D).
 # Les domaines sont DÉCOUVERTS dynamiquement : tout dossier `index_<domaine>` sous la racine
 # des index est un domaine interrogeable (plus de liste en dur — un nouvel index déposé par un
 # script ou un rebuild devient accessible sans toucher au serveur). DEFAULT_DATA_DIR reste le
-# défaut local ; surchargé par MOSAIC_MCP_DATA_DIR (tests, autre machine).
-DEFAULT_DATA_DIR = Path.home() / ".mosaic"
+# défaut local LOCAL ; surchargé par MOSAIC_MCP_DATA_DIR (tests, autre machine).
+DEFAULT_DATA_DIR = Path("/opt/mosaic/mosaic")
 
 
 def domaines_disponibles(data_dir: Path) -> list[str]:
@@ -63,8 +64,30 @@ TOOLS = [
     {
         "name": "mosaic_search",
         "description": (
-            "Recherche sémantique dans un index Mosaic (question en "
+            "Recherche sémantique dans un index Mosaic de production LOCAL (question en "
             "français, la paraphrase est acceptée, pas besoin des mots exacts). "
+            "FORMULER LA QUESTION AVEC LES MOTS DU DOCUMENT, PAS CEUX DU BESOIN — c'est "
+            "le facteur le plus déterminant, mesuré : la même recherche en 3 mots "
+            "discriminants sort au rang 2, décorée de 6 mots plausibles mais absents du "
+            "document, au rang 231. Une pièce scannée ne contient ni son fournisseur "
+            "(logo non OCRisé) ni son type développé ('BL', jamais 'bon de livraison'). "
+            "Question COURTE et discriminante d'abord ; élargir seulement si vide. "
+            "QUALIFIER quand vous savez : c'est vous qui connaissez l'intention de "
+            "l'utilisateur, le moteur ne connaît que le corpus — un `type` ou une "
+            "`recence` passés font gagner plus que n'importe quelle reformulation. Un "
+            "filtre qui écarterait tout vous est SIGNALÉ (avec le vocabulaire réel du "
+            "domaine), donc qualifier ne fait courir aucun risque. "
+            "FORMULER LA QUESTION AVEC LES MOTS DU DOCUMENT, PAS CEUX DU BESOIN — c'est "
+            "le facteur le plus déterminant, mesuré : la même recherche en 3 mots "
+            "discriminants sort au rang 2, décorée de 6 mots plausibles mais absents du "
+            "document, au rang 231. Une pièce scannée ne contient ni son fournisseur "
+            "(logo non OCRisé) ni son type développé ('BL', jamais 'bon de livraison'). "
+            "Question COURTE et discriminante d'abord ; élargir seulement si vide. "
+            "QUALIFIER quand vous savez : c'est vous qui connaissez l'intention de "
+            "l'utilisateur, le moteur ne connaît que le corpus — un `type` ou une "
+            "`recence` passés font gagner plus que n'importe quelle reformulation. Un "
+            "filtre qui écarterait tout vous est SIGNALÉ (avec le vocabulaire réel du "
+            "domaine), donc qualifier ne fait courir aucun risque. "
             "MODE D'EMPLOI (choisir les bonnes options rend la réponse meilleure) : "
             "question datée ou dossier qui évolue -> recence=0.5 (les versions récentes "
             "remontent, ne pas prendre une donnée périmée pour canonique) ; besoin d'un type "
@@ -98,16 +121,18 @@ TOOLS = [
                 "grammatical": {
                     "type": "boolean",
                     "default": False,
-                    "description": "Canal grammatical (nécessite un index --grammatical) : "
-                    "sépare les clauses à mots identiques et sens opposé (négation à portée, "
-                    "amont/aval). À activer quand la STRUCTURE de la phrase porte le sens ; "
-                    "exclusif avec rerank/fusion/type/recence.",
+                    "description": "Canal grammatical (nécessite un index --grammatical). "
+                    "DÉCONSEILLÉ — MESURÉ SANS APPORT : sur 2 316 requêtes réelles, il "
+                    "rattrape 7 requêtes que la grille rate et en fait perdre 19 ; il voit "
+                    "le même monde que la grille, en plus flou. Laissé pour la recherche "
+                    "et le portage vers d'autres langues, pas pour interroger la "
+                    "production : préférer fusion. Exclusif avec rerank/fusion/type/recence.",
                 },
                 "rerank": {
                     "type": "boolean",
                     "default": True,
                     "description": "Repêcheur model2vec — nécessite un index construit avec "
-                    "--rerank-vectors (si l'index a été construit avec).",
+                    "--rerank-vectors (c'est le cas des index de production).",
                 },
                 "type": {
                     "type": ["string", "null"],
@@ -314,7 +339,7 @@ TOOLS = [
         "name": "mosaic_compter",
         "description": (
             "COMPTE EXACT de documents — pas une recherche. À utiliser dès que la question "
-            "est « combien » (« combien de BL fournisseur en juin ? », « combien de photos sur ce "
+            "est « combien » (« combien de BL Fournisseur en juin ? », « combien de photos sur ce "
             "chantier ? ») : une recherche sémantique rend des documents classés par "
             "ressemblance, elle ne sait pas COMPTER. Filtres cumulatifs et tous optionnels : "
             "chemin (fragment, cherché littéralement), type, date (préfixe 2026 / 2026-06 / "
@@ -420,7 +445,7 @@ TOOLS = [
 
 def _default_data_dir() -> Path:
     """Racine des 4 index de production, surchargeable par MOSAIC_MCP_DATA_DIR (tests —
-    jamais pointer les tests vers la racine des index, index de production en lecture seule)."""
+    jamais pointer les tests vers /opt/mosaic/mosaic, index de production en lecture seule)."""
     override = os.environ.get("MOSAIC_MCP_DATA_DIR")
     return Path(override) if override else DEFAULT_DATA_DIR
 
@@ -452,7 +477,7 @@ def _get_index(state: dict, domaine: str) -> Index:
     cache_mtime = state.setdefault("cache_mtime", {})
     current_mtime = _vocab_mtime(index_dir)
     # Réutilise l'Index en cache seulement si sa mtime d'ouverture correspond ENCORE à celle
-    # sur disque — un rebuild planifié (une tâche planifiée, dimanche 03h) remplace
+    # sur disque — un rebuild planifié (LOCAL_Mosaic_Rebuild, dimanche 03h) remplace
     # atomiquement vocab.msev (cf. Fix atomique de _write) : sans cette comparaison, le
     # serveur MCP servirait indéfiniment le contenu du premier open() du process, y compris
     # des résultats vieux d'une semaine (revue finale v1.6, Critical). `current_mtime is
@@ -477,6 +502,118 @@ def _require(args: dict, *names: str) -> None:
         raise ValueError(f"paramètre(s) requis manquant(s) : {', '.join(manquants)}")
 
 
+def _conseil_aiguillage(question: str) -> str | None:
+    """Un mot si un AUTRE outil répondrait mieux — sinon rien.
+
+    Ne conseille que les deux circuits qui ont un outil dédié rendant une réponse
+    d'une autre NATURE (un compte, un ordre exact). Le circuit référence n'est pas
+    conseillé : son boost est déjà automatique dans la recherche, le signaler
+    serait du bruit."""
+    from mosaic.aiguilleur import Circuit, aiguiller
+
+    r = aiguiller(question)
+    if r.circuit is Circuit.COMPTAGE:
+        return (
+            f"cette question attend un NOMBRE ({r.motif}) — `mosaic_compter` y répond "
+            "exactement, là où une recherche ne peut que rendre des documents "
+            "ressemblants ; ci-dessous les résultats de la recherche, au cas où"
+        )
+    if r.circuit is Circuit.ORDRE:
+        return (
+            f"cette question attend LE document en tête d'un ordre ({r.motif}) — "
+            "`mosaic_recents` classe par date exacte, là où une recherche classe par "
+            "ressemblance ; ci-dessous les résultats de la recherche, au cas où"
+        )
+    return None
+
+
+def _diagnostic_filtre_vide(
+    state: dict, args: dict, idx, top: int, rerank: bool, fusion: bool
+) -> object:
+    """Rejoue la recherche SANS le filtre de type et rend un diagnostic lisible.
+
+    N'est appelé que dans le cas rare où le filtre a tout écarté : le coût d'une
+    seconde recherche ne se paie donc jamais en régime normal."""
+    sans = idx.search(args["question"], k=top, rerank=rerank, fusion=fusion)
+    types = {}
+    try:
+        magasin, charges = _magasin_pour(state, [args["domaine"]])
+        if charges:
+            types = magasin.types_disponibles(args["domaine"])
+    except (OSError, ValueError):
+        pass  # le diagnostic est un service rendu, jamais une raison d'échouer
+    return {
+        "resultats": [],
+        "filtre_ecarte_tout": {
+            "type_demande": args.get("type"),
+            "sans_ce_filtre": len(sans),
+            "premier_sans_filtre": sans[0]["id"] if sans else None,
+            "types_reels_du_domaine": types,
+            "conseil": (
+                "le type demandé n'existe pas dans ce domaine ou ne correspond à "
+                "aucun résultat pertinent — relancer sans `type`, ou avec l'un des "
+                "types réellement présents ci-dessus"
+            ),
+        },
+    }
+
+
+def _conseil_aiguillage(question: str) -> str | None:
+    """Un mot si un AUTRE outil répondrait mieux — sinon rien.
+
+    Ne conseille que les deux circuits qui ont un outil dédié rendant une réponse
+    d'une autre NATURE (un compte, un ordre exact). Le circuit référence n'est pas
+    conseillé : son boost est déjà automatique dans la recherche, le signaler
+    serait du bruit."""
+    from mosaic.aiguilleur import Circuit, aiguiller
+
+    r = aiguiller(question)
+    if r.circuit is Circuit.COMPTAGE:
+        return (
+            f"cette question attend un NOMBRE ({r.motif}) — `mosaic_compter` y répond "
+            "exactement, là où une recherche ne peut que rendre des documents "
+            "ressemblants ; ci-dessous les résultats de la recherche, au cas où"
+        )
+    if r.circuit is Circuit.ORDRE:
+        return (
+            f"cette question attend LE document en tête d'un ordre ({r.motif}) — "
+            "`mosaic_recents` classe par date exacte, là où une recherche classe par "
+            "ressemblance ; ci-dessous les résultats de la recherche, au cas où"
+        )
+    return None
+
+
+def _diagnostic_filtre_vide(
+    state: dict, args: dict, idx, top: int, rerank: bool, fusion: bool
+) -> object:
+    """Rejoue la recherche SANS le filtre de type et rend un diagnostic lisible.
+
+    N'est appelé que dans le cas rare où le filtre a tout écarté : le coût d'une
+    seconde recherche ne se paie donc jamais en régime normal."""
+    sans = idx.search(args["question"], k=top, rerank=rerank, fusion=fusion)
+    types = {}
+    try:
+        magasin, charges = _magasin_pour(state, [args["domaine"]])
+        if charges:
+            types = magasin.types_disponibles(args["domaine"])
+    except (OSError, ValueError):
+        pass  # le diagnostic est un service rendu, jamais une raison d'échouer
+    return {
+        "resultats": [],
+        "filtre_ecarte_tout": {
+            "type_demande": args.get("type"),
+            "sans_ce_filtre": len(sans),
+            "premier_sans_filtre": sans[0]["id"] if sans else None,
+            "types_reels_du_domaine": types,
+            "conseil": (
+                "le type demandé n'existe pas dans ce domaine ou ne correspond à "
+                "aucun résultat pertinent — relancer sans `type`, ou avec l'un des "
+                "types réellement présents ci-dessus"
+            ),
+        },
+    }
+
+
 def _call_mosaic_search(state: dict, args: dict) -> object:
     _require(args, "question", "domaine")
     top = int(args.get("top", 5))
@@ -490,15 +627,46 @@ def _call_mosaic_search(state: dict, args: dict) -> object:
     type_filtre = args.get("type") or None
     recence = float(args.get("recence", 0.0))
     idx = _get_index(state, args["domaine"])
-    return idx.search(
-        args["question"],
-        k=top,
-        rerank=rerank,
-        type_filtre=type_filtre,
-        recence=recence,
-        fusion=fusion,
-        grammatical=grammatical,
-    )
+    # `rerank` vaut True par DÉFAUT (les index de production le portent tous), mais
+    # un domaine découvert dynamiquement peut avoir été construit sans. Le moteur
+    # refuse alors — c'est la doctrine, jamais de dégradation silencieuse : un agent
+    # qui croit avoir un repêcheur qu'il n'a pas tirerait de fausses conclusions.
+    # Ce qui manquait, c'est le geste de SORTIE : le message parlait de reconstruire
+    # l'index, alors que l'appelant peut simplement réessayer sans le drapeau.
+    try:
+        hits = idx.search(
+            args["question"],
+            k=top,
+            rerank=rerank,
+            type_filtre=type_filtre,
+            recence=recence,
+            fusion=fusion,
+            grammatical=grammatical,
+        )
+        conseil = _conseil_aiguillage(args["question"])
+        if conseil and hits:
+            # Les résultats sont rendus TELS QUELS : le conseil s'ajoute, il ne
+            # remplace pas. L'aiguilleur est resté en diagnostic à son banc
+            # (3,32 % de fausses alarmes) — à ce taux, conseiller est utile,
+            # router serait dangereux.
+            return {"resultats": hits, "conseil": conseil}
+        if type_filtre and not hits:
+            # Un filtre qui écarte TOUT est le pire mode de défaillance pour un
+            # agent : il reçoit une liste vide et conclut « ce document n'existe
+            # pas » alors qu'il l'a lui-même exclu. On lui rend donc ce que la
+            # recherche aurait donné sans le filtre, et le vocabulaire RÉEL du
+            # domaine — de quoi se corriger en un tour, sans deviner.
+            return _diagnostic_filtre_vide(state, args, idx, top, rerank, fusion)
+        return hits
+    except ValueError as e:
+        if rerank and "rerank.msrv" in str(e) and "rerank" not in args:
+            raise ValueError(
+                f"le domaine '{args['domaine']}' n'a pas de vecteurs de repêchage "
+                "(index construit sans --rerank-vectors) alors que rerank est actif "
+                "par défaut — relancer la même question avec rerank=false, ou "
+                "reconstruire l'index avec --rerank-vectors pour un meilleur classement"
+            ) from e
+        raise
 
 
 def _call_mosaic_diff(state: dict, args: dict) -> object:
@@ -608,20 +776,32 @@ def _call_mosaic_stats(state: dict, args: dict) -> object:
 
 
 def _magasin_pour(state: dict, domaines: list[str]):
-    """Magasin structurel dérivé des facettes des domaines demandés.
+    """Magasin structurel dérivé des facettes, MIS EN CACHE par domaine.
 
-    Reconstruit à chaque appel : 0,2 s pour 4 000 documents, et zéro risque de
-    servir un compte périmé après un rebuild — un compte faux serait pire que
-    l'attente qu'il économise."""
+    Le peuplement était payé à chaque appel : mesuré 58 ms pour un domaine mais
+    **630 ms pour `mosaic_refs` sur six domaines** — douze fois la promesse de
+    latence du serveur. Le magasin suit donc le même motif que les Index :
+    conservé entre les appels, re-peuplé pour le seul domaine dont la mtime de
+    `facettes.json` a changé (un rebuild nocturne la fait bouger). Un compte
+    périmé reste impossible, sans repayer la lecture à chaque question.
+    Mesuré après : 2,4 ms pour la jointure, 0,3 ms pour un comptage."""
     from mosaic.structurel import Magasin
 
-    m = Magasin()
+    m = state.get("magasin")
+    if m is None:
+        m = state["magasin"] = Magasin()
+    mtimes = state.setdefault("magasin_mtimes", {})
     charges = []
     for d in domaines:
-        index_dir = Path(state["data_dir"]) / f"index_{d}"
-        if (index_dir / "facettes.json").exists():
-            m.charger(d, index_dir)
-            charges.append(d)
+        facettes = Path(state["data_dir"]) / f"index_{d}" / "facettes.json"
+        try:
+            mtime = facettes.stat().st_mtime
+        except OSError:
+            continue  # domaine sans facettes (index d'avant v1.5) : ignoré, pas fatal
+        if mtimes.get(d) != mtime:
+            m.charger_depuis(d, json.loads(facettes.read_text(encoding="utf-8")))
+            mtimes[d] = mtime
+        charges.append(d)
     return m, charges
 
 

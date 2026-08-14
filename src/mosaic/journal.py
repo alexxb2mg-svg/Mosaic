@@ -31,8 +31,10 @@ il n'a pas le droit d'avoir un avis sur le déroulement de ce qu'il observe.
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,6 +43,13 @@ VARIABLE = "MOSAIC_JOURNAL"
 # processus distincts. Sans lui, deux agents qui cherchent en même temps auraient l'air
 # de se reformuler l'un l'autre — et le signal le plus utile deviendrait le plus faux.
 _PID = os.getpid()
+# Le PID du PARENT dit autre chose, et c'est ce qui manquait : il identifie la SESSION.
+# Un agent ne lance pas un processus, il en lance plusieurs — ce moteur de recherche et,
+# à côté, l'outil qui ouvrira le document trouvé. Ces deux-là ont des PID différents mais
+# le même parent. Le noter ici est ce qui permet, plus tard et sans rien coordonner, de
+# rapprocher « cette question a été posée » de « ce document a ensuite été ouvert » : le
+# jugement de pertinence que personne n'a eu à écrire.
+_PPID = os.getppid()
 
 
 def actif() -> Path | None:
@@ -60,12 +69,52 @@ def _ligne(index: str, requete: str, k: int, options: dict, hits: list[dict]) ->
     return {
         "t": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "pid": _PID,
+        "ppid": _PPID,
         "index": index,
         "q": requete,
         "k": k,
         "opts": options,
         "hits": resultats,
     }
+
+
+VARIABLE_MAX_MO = "MOSAIC_JOURNAL_MAX_MO"
+MAX_MO_DEFAUT = 5.0
+
+
+def _pivoter(chemin: Path) -> None:
+    """Archive le journal COMPRESSÉ et le laisse repartir à vide, au-delà du seuil.
+
+    Rotation par TAILLE, pas par date : c'est le volume qui gêne, et une semaine
+    chargée ne pèse pas comme une semaine calme. Le seuil (`MOSAIC_JOURNAL_MAX_MO`,
+    5 Mo par défaut) laisse plusieurs semaines d'usage soutenu dans le fichier
+    actif — une ligne pèse ~1,2 ko.
+
+    ARCHIVER, jamais SUPPRIMER. Mesuré sur un journal réel : la compression rend
+    un facteur **3,7** (pas dix — les lignes portent des chemins longs et variés,
+    peu redondants). Soit, à 200 recherches par jour, 79 Mo par an bruts et
+    21 Mo archivés, avec une rotation toutes les trois semaines environ. C'est le
+    prix d'une vérité terrain que personne n'a eu à annoter : la jeter pour gagner
+    vingt mégaoctets serait un mauvais échange."""
+    try:
+        seuil = float(os.environ.get(VARIABLE_MAX_MO, MAX_MO_DEFAUT))
+    except ValueError:
+        return  # seuil illisible : on ne pivote pas plutôt que de deviner
+    if seuil <= 0 or not chemin.exists() or chemin.stat().st_size < seuil * 1024 * 1024:
+        return
+    horodatage = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    archive = chemin.with_name(f"{chemin.stem}-{horodatage}{chemin.suffix}.gz")
+    try:
+        with (
+            chemin.open("rb") as src,
+            gzip.open(archive, "wb") as dst,
+        ):
+            shutil.copyfileobj(src, dst)
+        chemin.unlink()
+    except OSError:
+        # Disque plein, fichier verrouillé : on garde le journal tel quel. Un
+        # journal trop gros est un inconvénient ; une recherche cassée est un bug.
+        return
 
 
 def consigner(
@@ -80,6 +129,7 @@ def consigner(
         return
     try:
         chemin.parent.mkdir(parents=True, exist_ok=True)
+        _pivoter(chemin)
         with chemin.open("a", encoding="utf-8") as f:
             f.write(
                 json.dumps(_ligne(index, requete, k, options, hits), ensure_ascii=False)

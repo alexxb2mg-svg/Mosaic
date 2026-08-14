@@ -238,7 +238,7 @@ class Profiles:
 
         `dico` (optionnel) : ne garder que les tokens présents dans ce vocabulaire de VRAIS mots
         français (ex. les 160k mots de la table potion, déjà chargés). Écarte proprement le
-        boilerplate de contenu (collocations d'en-tête société, codes, dates) qui échappe
+        boilerplate de contenu (collocations `sarl_client`/`pdf_local`, codes, dates) qui échappe
         aux trois filtres ci-dessus — au prix des codes-métier utiles (16a, ip20…) absents du
         dictionnaire. À n'activer que si l'on veut un voisinage strictement lexical. Sans `dico`,
         un nom propre mono-mot fréquent (un nom de société) peut subsister (cœur de la NER)."""

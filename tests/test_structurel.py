@@ -160,3 +160,11 @@ def test_caractere_joker_sql_est_litteral(magasin):
     assert magasin.compter("test", chemin_contient="BL%FOURNISSEUR") == 0
     assert magasin.compter("test", chemin_contient="IMG_2043") == 1
     assert magasin.compter("test", chemin_contient="IMGx2043") == 0
+
+
+def test_types_disponibles_dit_le_vocabulaire_reel(magasin):
+    """Un agent qui filtre sur un type inexistant reçoit zéro résultat et croit
+    que le document n'existe pas. Pour se corriger, il lui faut le vocabulaire
+    RÉEL du domaine — c'est ce que rend cette méthode, avec les effectifs."""
+    assert magasin.types_disponibles("test") == {"pdf numérique": 4, "photo": 1}
+    assert magasin.types_disponibles("domaine-inconnu") == {}

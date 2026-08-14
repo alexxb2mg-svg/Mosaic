@@ -24,9 +24,9 @@ from mosaic.croyance import MemoireCroyance
 ATTRIBUTS = ["etat", "responsable", "phase", "materiel", "priorite"]
 VALEURS = {
     "etat": ["en_cours", "termine", "en_attente", "bloque", "recupere"],
-    "responsable": ["marie", "paul", "lea", "hugo", "sous_traitant"],
+    "responsable": ["personne_a", "personne_b", "personne_c", "personne_d", "sous_traitant"],
     "phase": ["etude", "chantier", "reception", "sav", "cloture"],
-    "materiel": ["fabricant_a", "schneider", "legrand", "abb", "mixte"],
+    "materiel": ["fabricanta", "schneider", "legrand", "abb", "mixte"],
     "priorite": ["basse", "normale", "haute", "urgente"],
 }
 

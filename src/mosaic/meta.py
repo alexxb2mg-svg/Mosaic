@@ -1,5 +1,5 @@
-"""Méta-recherche cross-index : une question, plusieurs corpus (devis, comptabilité, projets,
-courriels, notes), une liste fusionnée.
+"""Méta-recherche cross-index : une question, plusieurs corpus (devis, compta, chantiers, comms,
+alexandria), une liste fusionnée.
 
 Le piège : les scores de deux index différents ne sont PAS comparables (échelles distinctes selon
 le vocabulaire du corpus). Concaténer par score brut laisserait l'index à la plus grande échelle

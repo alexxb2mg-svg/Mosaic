@@ -16,8 +16,8 @@ Trois principes (revue de paramétrage, 11/08) :
      (mode humain) ; `mosaic profil <corpus> --suggere` le CALIBRE depuis le corpus réel
      (mode agent : scanner l'environnement, proposer, ajuster, construire).
 
-Sans profil, rien ne change : les défauts sont le comportement historique (le profil
-implicite d'origine).
+Sans profil, rien ne change : les défauts sont le comportement historique (le « profil
+LOCAL » implicite).
 """
 
 import json

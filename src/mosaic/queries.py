@@ -18,6 +18,7 @@ from mosaic.docio import _EXTS, _read_text, _read_text_convertible
 from mosaic.encoder import _signed_counts, encode, quantize
 from mosaic.lexicon import canonicalize
 from mosaic import ingest
+from mosaic import ngrammes as ngrammes_module
 from mosaic.meta import K_RRF_DEFAULT
 from mosaic import typage as typage_module
 from mosaic import atlas as atlas_module
@@ -37,10 +38,7 @@ def search(
     rerank_lambda: float = 0.70,
     rerank_depth: int = 50,
 ) -> list[dict]:
-    tokens = merge(
-        merge(canonicalize(tokenize(text), idx._compiled), idx.colloc),
-        idx.colloc,
-    )
+    tokens = flux_requete(idx, text)
     q, qnorm = encode(
         tokens,
         idx.profiles,
@@ -69,14 +67,45 @@ def search(
     )
 
 
+def flux_requete(idx: "Index", text: str) -> list[str]:
+    """Le flux de tokens d'une requête — canonicalisé, collocations fusionnées, et
+    enrichi de n-grammes de caractères si l'index en porte.
+
+    Centralisé ici parce que la même construction existait à l'identique en trois
+    endroits : trois occasions d'oublier une étape, et donc de comparer la requête
+    à des documents encodés autrement. L'invariant du moteur est que les deux
+    côtés voient le MÊME monde.
+
+    LES N-GRAMMES SONT UN REPLI, PAS UN ENRICHISSEMENT SYSTÉMATIQUE — et c'est la
+    mesure qui l'impose (14/08, corpus métier). Fragmenter TOUS les mots de la
+    requête coûte 10 points de rappel sur les requêtes saines, pour annuler les
+    10 points que coûte une faute d'OCR : on perdrait sur toutes les recherches
+    pour gagner sur une sur dix. Un second banc a montré que cette dilution vient
+    ENTIÈREMENT de la requête — un index enrichi interrogé sans fragmenter rend
+    exactement le rappel d'un index normal (0,8000 contre 0,8000).
+
+    D'où la règle : on ne fragmente QUE les mots que le vocabulaire ne connaît
+    pas. Un mot correct est cherché tel quel, sans bruit ajouté ; un mot qu'aucun
+    document ne porte — typiquement celui qu'une confusion de glyphes vient de
+    créer — se rabat sur ses fragments, où il retrouve ses cousins. Le repli ne se
+    déclenche donc que là où la recherche exacte ne pouvait rien trouver."""
+    tokens = merge(
+        merge(canonicalize(tokenize(text), idx._compiled), idx.colloc), idx.colloc
+    )
+    n = getattr(idx, "ngrammes", 0)
+    if not n:
+        return tokens
+    connus = idx.profiles.rows
+    inconnus = [t for t in tokens if t not in connus]
+    return tokens + ngrammes_module.enrichir(inconnus, n)[len(inconnus) :]
+
+
 def _cos_all(idx: "Index", text: str) -> np.ndarray:
     """Cosinus de CHAQUE document contre la sous-requête `text` (même encodage que `search`)."""
     n = len(idx.ids)
     if not text.strip() or not n:
         return np.zeros(n, dtype=np.float32)
-    tokens = merge(
-        merge(canonicalize(tokenize(text), idx._compiled), idx.colloc), idx.colloc
-    )
+    tokens = flux_requete(idx, text)
     q, qnorm = encode(
         tokens,
         idx.profiles,
@@ -100,9 +129,7 @@ def _canaux_typee(
     — cf. mosaic.typage, leçon du banc produits). Une grille sans signal est absente."""
     assert idx.grilles is not None
     config = typage_module.config_grilles(idx.profil)
-    tokens = merge(
-        merge(canonicalize(tokenize(text), idx._compiled), idx.colloc), idx.colloc
-    )
+    tokens = flux_requete(idx, text)
     flux = typage_module.router_flux(tokens, [], config, (idx.profil or {}).get("refs"))
     canaux: list[tuple[str, float, np.ndarray]] = []
     ref_identifiant = False
@@ -294,9 +321,7 @@ def search_fusion(idx: "Index", text: str, k: int = 10) -> list[dict]:
     n = len(idx.ids)
     if n == 0:
         return []
-    tokens = merge(
-        merge(canonicalize(tokenize(text), idx._compiled), idx.colloc), idx.colloc
-    )
+    tokens = flux_requete(idx, text)
     canaux: list[tuple[str, np.ndarray]] = []
     cos = _cos_all(idx, text)
     if np.any(cos):

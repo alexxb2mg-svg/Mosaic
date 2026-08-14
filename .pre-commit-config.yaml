@@ -1,5 +1,5 @@
 # Hooks pré-commit et pré-push Mosaic — activation : pip install pre-commit && pre-commit install --hook-type pre-commit --hook-type pre-push
-# (geste laissé à Alex, comme la tâche planifiée et le MCP)
+# (geste laissé à l'auteur, comme la tâche planifiée et le MCP)
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.2          # ALIGNÉ sur le CI (pyproject dev + ci.yml) — sinon dérive de règles

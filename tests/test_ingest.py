@@ -276,7 +276,7 @@ def test_cache_key_differe_selon_ocr(tmp_path):
 def test_available_ocr_false_sans_moteur(monkeypatch):
     """Sans moteur importable, la détection dégrade proprement (False), jamais
     d'exception. (Simulé par monkeypatch : rapidocr est installé sur cette machine
-    depuis la validation du 09/08.)"""
+    depuis la validation l'auteur du 09/08.)"""
     monkeypatch.setattr(ingest, "RapidOCR", None)
     assert ingest.available_ocr() is False
 

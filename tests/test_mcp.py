@@ -1,4 +1,4 @@
-"""Tests volet E v1.6 : wrapper MCP `mosaic` (infra_mcp/mosaic_mcp.py).
+"""Tests volet E v1.6 : wrapper MCP `mosaic-local` (infra_mcp/mosaic_mcp.py).
 
 Dispatch JSON-RPC 2.0 écrit à la main (zéro dépendance `mcp`), testé sans stdio via
 `handle_request(request, state) -> response | None`. `conftest.py` ajoute `infra_mcp/` au
@@ -384,7 +384,7 @@ def test_index_cache_reused_across_calls(tmp_path):
 
 def test_index_cache_reopens_when_vocab_mtime_changes(tmp_path):
     """Revue finale v1.6 (Critical) : un rebuild complet de l'index pendant que le serveur
-    tourne (tâche planifiée) doit être visible à l'appel suivant —
+    tourne (tâche planifiée `LOCAL_Mosaic_Rebuild`) doit être visible à l'appel suivant —
     sans redémarrer le process. Sans reprise sur mtime, le cache servirait indéfiniment
     l'ancien contenu (résultats vieux d'une semaine, cf. revue).
 
@@ -570,3 +570,138 @@ def test_call_diff_domaines_identiques_diff_vide(tmp_path, monkeypatch):
     assert not rep["result"].get("isError"), rep
     donnees = json.loads(rep["result"]["content"][0]["text"])
     assert donnees["docs_ajoutes"] == [] and donnees["derive_mots"] == []
+
+
+# --- magasin structurel : les outils de comptage répondent VRAIMENT --------------
+
+
+def test_les_outils_du_magasin_repondent_sur_un_index_reel(tmp_path, monkeypatch):
+    """Test de bout en bout des trois outils de comptage, avec le cache.
+
+    Écrit après un incident du 14/08 : une méthode du magasin (`charger_depuis`,
+    appelée uniquement par le chemin de cache du serveur) a disparu lors d'une
+    copie entre dépôts, et AUCUN test ne l'a vu — la suite entière passait au vert
+    pendant que les trois outils rendaient une erreur. Un test qui ne traverse pas
+    l'appel réel ne protège pas l'appel réel."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "2026-06-01_note.md").write_text("tableau électrique", encoding="utf-8")
+    (corpus / "2026-07-02_note.md").write_text("disjoncteur courbe C", encoding="utf-8")
+    racine = tmp_path / "indexes"
+    racine.mkdir()
+    Index.build(corpus, racine / "index_test", grid=(32, 32, 3), smoothing_rank=0)
+    state = mcp.new_state(racine)
+
+    def appeler(nom, args):
+        rep = mcp.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": nom, "arguments": args},
+            },
+            state,
+        )
+        return rep["result"]
+
+    r = appeler("mosaic_compter", {"domaine": "test"})
+    assert not r.get("isError"), r["content"][0]["text"]
+    assert json.loads(r["content"][0]["text"])["total"] == 2
+
+    # deuxième appel : c'est le CHEMIN DE CACHE qui était cassé, pas le premier
+    r2 = appeler("mosaic_compter", {"domaine": "test", "date": "2026-07"})
+    assert not r2.get("isError"), r2["content"][0]["text"]
+    assert json.loads(r2["content"][0]["text"])["total"] == 1
+
+    r3 = appeler("mosaic_recents", {"domaine": "test", "k": 1})
+    assert not r3.get("isError"), r3["content"][0]["text"]
+    assert json.loads(r3["content"][0]["text"])[0]["date"] == "2026-07-02"
+
+    r4 = appeler("mosaic_refs", {"ref": "inexistante", "domaines": ["test"]})
+    assert not r4.get("isError"), r4["content"][0]["text"]
+    assert json.loads(r4["content"][0]["text"])["documents"] == []
+
+
+def test_un_filtre_de_type_qui_ecarte_tout_le_dit(tmp_path):
+    """Jamais de dégradation silencieuse : si le type demandé vide le résultat,
+    l'agent reçoit ce qu'aurait donné la recherche sans lui, et le vocabulaire
+    réel du domaine — de quoi se corriger seul plutôt que conclure « ça n'existe
+    pas » sur un document qu'il a lui-même exclu."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "note.md").write_text(
+        "tableau électrique disjoncteur courbe C", encoding="utf-8"
+    )
+    racine = tmp_path / "indexes"
+    racine.mkdir()
+    Index.build(corpus, racine / "index_test", grid=(32, 32, 3), smoothing_rank=0)
+    state = mcp.new_state(racine)
+
+    rep = mcp.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "mosaic_search",
+                "arguments": {
+                    "question": "tableau électrique",
+                    "domaine": "test",
+                    "type": "présentation",
+                    "rerank": False,
+                },
+            },
+        },
+        state,
+    )
+    assert not rep["result"].get("isError")
+    d = json.loads(rep["result"]["content"][0]["text"])["filtre_ecarte_tout"]
+    assert d["type_demande"] == "présentation"
+    assert d["sans_ce_filtre"] >= 1, "la recherche sans filtre trouvait pourtant"
+    assert d["premier_sans_filtre"] == "note.md"
+    assert "note texte" in d["types_reels_du_domaine"], d["types_reels_du_domaine"]
+
+
+def test_une_question_de_comptage_recoit_un_conseil_sans_perdre_ses_resultats(tmp_path):
+    """L'aiguilleur CONSEILLE, il ne route pas — son banc l'a laissé en diagnostic
+    (3,32 % de fausses alarmes). Un conseil erroné coûte une ligne ignorée ; un
+    routage erroné rendrait un nombre là où l'agent attend des documents. L'agent
+    apprend donc au moment où il se trompe, pas dans un mode d'emploi."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "bl.md").write_text("bon de livraison fournisseur", encoding="utf-8")
+    racine = tmp_path / "indexes"
+    racine.mkdir()
+    Index.build(corpus, racine / "index_test", grid=(32, 32, 3), smoothing_rank=0)
+    state = mcp.new_state(racine)
+
+    def chercher(question):
+        rep = mcp.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "mosaic_search",
+                    "arguments": {
+                        "question": question,
+                        "domaine": "test",
+                        "rerank": False,
+                    },
+                },
+            },
+            state,
+        )
+        assert not rep["result"].get("isError"), rep["result"]["content"][0]["text"]
+        return json.loads(rep["result"]["content"][0]["text"])
+
+    d = chercher("combien de bons de livraison en juin")
+    assert d["resultats"], "les résultats sont rendus MALGRÉ le conseil"
+    assert "mosaic_compter" in d["conseil"], d["conseil"]
+
+    d2 = chercher("le dernier bon de livraison reçu")
+    assert "mosaic_recents" in d2["conseil"], d2["conseil"]
+
+    # une question de sens ne reçoit AUCUN conseil : pas de bruit dans le cas courant
+    d3 = chercher("bon de livraison fournisseur")
+    assert isinstance(d3, list), "sans conseil, la réponse reste la liste habituelle"

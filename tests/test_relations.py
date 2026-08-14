@@ -397,7 +397,7 @@ def test_entities_from_path_date_pure_pas_de_dossier_collision():
     chantiers (08-Août) collisionneraient."""
     from mosaic.relations import entities_from_path
 
-    devis = entities_from_path("2026/08.2026/D26089903_KUMQUAT.pdf")
+    devis = entities_from_path("2026/08.2026/D26089903_CLIENT.pdf")
     assert ("annee", "2026") in devis and ("mois", "2026-08") in devis
     assert not any(role == "dossier" for role, _ in devis)  # aucun faux dossier
     chantier = entities_from_path("2026/08-Août/ATLAS_NORD/devis.pdf")

@@ -68,7 +68,12 @@ class Magasin:
                 f"{chemin} absent : index construit avant les facettes (v1.5) — "
                 "le reconstruire pour utiliser le magasin structurel"
             )
-        facettes = json.loads(chemin.read_text(encoding="utf-8"))
+        return self.charger_depuis(nom, json.loads(chemin.read_text(encoding="utf-8")))
+
+    def charger_depuis(self, nom: str, facettes: dict[str, dict]) -> int:
+        """Même chose depuis des facettes DÉJÀ lues — pour un appelant qui garde le
+        JSON en cache (le serveur MCP) et ne veut pas repayer la lecture disque à
+        chaque question. Rend le nombre de documents."""
         self.db.execute("DELETE FROM documents WHERE idx = ?", (nom,))
         self.db.execute("DELETE FROM refs WHERE idx = ?", (nom,))
         self.db.executemany(
@@ -157,6 +162,21 @@ class Magasin:
                 "JOIN documents d ON d.idx = r.idx AND d.doc_id = r.doc_id "
                 "WHERE r.ref = ? ORDER BY d.date DESC, r.doc_id",
                 (ref,),
+            )
+        )
+
+    def types_disponibles(self, idx: str) -> dict[str, int]:
+        """Les types de documents RÉELLEMENT présents, avec leurs effectifs.
+
+        Sert à corriger une qualification fausse : un appelant qui filtre sur un
+        type absent reçoit zéro résultat et en conclut que le document n'existe
+        pas — alors qu'il l'a lui-même exclu. Lui rendre le vocabulaire réel du
+        domaine le laisse se corriger en un tour, sans deviner."""
+        return dict(
+            self.db.execute(
+                "SELECT type, COUNT(*) c FROM documents WHERE idx = ? AND type IS NOT NULL "
+                "GROUP BY type ORDER BY c DESC",
+                (idx,),
             )
         )
 
