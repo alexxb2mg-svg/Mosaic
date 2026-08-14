@@ -26,7 +26,7 @@ VALEURS = {
     "etat": ["en_cours", "termine", "en_attente", "bloque", "recupere"],
     "responsable": ["marie", "paul", "lea", "hugo", "sous_traitant"],
     "phase": ["etude", "chantier", "reception", "sav", "cloture"],
-    "materiel": ["fabricanta", "schneider", "legrand", "abb", "mixte"],
+    "materiel": ["fabricant_a", "schneider", "legrand", "abb", "mixte"],
     "priorite": ["basse", "normale", "haute", "urgente"],
 }
 

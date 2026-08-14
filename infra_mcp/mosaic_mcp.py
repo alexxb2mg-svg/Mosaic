@@ -314,7 +314,7 @@ TOOLS = [
         "name": "mosaic_compter",
         "description": (
             "COMPTE EXACT de documents — pas une recherche. À utiliser dès que la question "
-            "est « combien » (« combien de BL Fournisseur en juin ? », « combien de photos sur ce "
+            "est « combien » (« combien de BL fournisseur en juin ? », « combien de photos sur ce "
             "chantier ? ») : une recherche sémantique rend des documents classés par "
             "ressemblance, elle ne sait pas COMPTER. Filtres cumulatifs et tous optionnels : "
             "chemin (fragment, cherché littéralement), type, date (préfixe 2026 / 2026-06 / "
