@@ -13,6 +13,24 @@ repos:
       - id: gitleaks      # scan de secrets (données sensibles dans le code)
   - repo: local
     hooks:
+      - id: hygiene
+        name: fixtures et exemples synthétiques
+        # gitleaks ne voit que les secrets à signature (clés, jetons, IBAN) : ce
+        # contrôle attrape le reste — termes d'une liste externe au dépôt (propre
+        # à chaque site ; absente, seuls les motifs structurels tournent),
+        # chemins de poste de travail, emails hors noreply.
+        entry: python scripts/verifier_hygiene.py
+        language: system
+        types: [text]
+      - id: hygiene-historique
+        name: hygiène de l'historique (commits, tags, auteurs)
+        # L'arbre courant ne dit rien de ce qu'un vieux commit ou un tag continue
+        # de servir : au push, chaque commit atteignable et chaque identité
+        # d'auteur sont contrôlés.
+        entry: python scripts/verifier_hygiene.py --historique
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
       - id: import-linter
         name: architecture (import-linter)
         # invocation par module : l'exécutable `lint-imports` n'est pas garanti sur le PATH
